@@ -2,7 +2,6 @@ import 'dotenv/config';
 
 const REQUIRED = [
   'RPC_URL',
-  'ORACLE_API_URL',
   'QUOTE_TOKEN_ADDRESS',
   'PRIVATE_KEY',
   'VAULT_ADDRESS',
@@ -16,6 +15,10 @@ for (const key of REQUIRED) {
   if (!process.env[key]) {
     throw new Error(`${key} must be specified`);
   }
+}
+
+if (!process.env.ONCHAIN_ORACLE_PRIMARY && !process.env.FIXED_PRICE) {
+  throw new Error('Oracle API URL must be specified');
 }
 
 if (process.env.ORACLE_API_KEY && !process.env.ORACLE_API_TIER) {

@@ -16,7 +16,18 @@ export async function getPrice(): Promise<bigint> {
 
   for (const tag of order) {
     try {
-      const price = await SOURCES[tag]();
+      let price;
+
+      if (env.FIXED_PRICE !== undefined && env.FIXED_PRICE > 0) {
+        const convertedPrice = await toAsset(env.FIXED_PRICE);
+        log.info(
+          { event: 'keeper_price_fixed', rawPrice: env.FIXED_PRICE, convertedPrice },
+          `using fixed price: ${convertedPrice}`,
+        );
+        price = convertedPrice;
+      } else {
+        price = await SOURCES[tag]();
+      }
 
       if (typeof price === 'number') {
         return toAsset(price);
