@@ -14,6 +14,7 @@ const SOURCES: Record<'onchain' | 'offchain', PriceSource> = {
 export async function getPrice(): Promise<bigint> {
   if (env.FIXED_PRICE && env.FIXED_PRICE > 0) return getFixedPrice(env.FIXED_PRICE);
 
+  const errors: Error[] = [];
   const order: ('onchain' | 'offchain')[] = env.ONCHAIN_ORACLE_PRIMARY
     ? ['onchain', 'offchain']
     : ['offchain', 'onchain'];
@@ -23,11 +24,13 @@ export async function getPrice(): Promise<bigint> {
       const price = await SOURCES[tag]();
       return typeof price === 'bigint' ? price : toAsset(price);
     } catch (err) {
+      const e = new Error(`${tag} price query failed`, { cause: err });
+      errors.push(e);
       log.warn({ event: 'price_query_failed', err, tag }, `${tag} price query failed`);
     }
   }
 
-  throw new Error('unable to fetch price from either source');
+  throw new AggregateError(errors, 'unable to fetch price from either source');
 }
 
 async function getFixedPrice(rawPrice: number): Promise<bigint> {
