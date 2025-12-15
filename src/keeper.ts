@@ -68,7 +68,7 @@ export async function run() {
 // ============= Core Rebalancing Functions =============
 
 async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
-  let bufferNeeded = calculateBufferDeficit(data);
+  let bufferNeeded = await _calculateBufferDeficit(data);
 
   for (let i = 0; i < data.buckets.length; i++) {
     const bucket = data.buckets[i]!;
@@ -83,29 +83,29 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
     for (const op of operations) {
       const txData = await executeMoveOperation(op);
       results.push(txData);
-    }
 
-    bufferNeeded = operations.reduce((needed, op, i) => {
-      const tx = results[i];
-      if (!tx || !tx.status) return needed;
-      return op.to === 'Buffer' ? needed - tx.assets : needed;
-    }, bufferNeeded);
+      if (op.to === 'Buffer' && txData?.status) {
+        bufferNeeded = await _calculateBufferDeficit(data);
+      }
+    }
   }
 }
 
 async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
-  const newBufferTotal = await getBufferTotal();
-  const difference = newBufferTotal - data.bufferTarget;
+  await _refreshBufferValues(data);
 
-  if (Math.abs(Number(difference)) < data.minAmount) return;
+  const difference = data.bufferTotal - data.bufferTarget;
+  const abs = difference >= 0n ? difference : -difference;
+
+  if (abs <= env.BUFFER_PADDING || abs < data.minAmount) return;
 
   if (difference > 0n) {
-    await moveExcessFromBuffer(difference, data.optimalBucket);
+    const amount = difference - env.BUFFER_PADDING;
+    await moveExcessFromBuffer(amount, data.optimalBucket);
   } else {
-    await fillBufferDeficit(-difference, data);
+    const amount = -difference - env.BUFFER_PADDING;
+    await fillBufferDeficit(amount, data);
   }
-
-  await verifyBufferTarget(data);
 }
 
 // ============= Operation Planning =============
@@ -259,20 +259,6 @@ async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boo
   );
 }
 
-function calculateBufferDeficit(data: KeeperRunData): bigint {
-  return data.bufferTarget > data.bufferTotal ? data.bufferTarget - data.bufferTotal : 0n;
-}
-
-async function verifyBufferTarget(data: KeeperRunData): Promise<void> {
-  const actual = await getBufferTotal();
-  if (Math.abs(Number(actual - data.bufferTarget)) > data.minAmount) {
-    log.warn(
-      { event: 'buffer_imbalance' },
-      `Buffer total (${actual}) does not equal Buffer target (${data.bufferTarget})`,
-    );
-  }
-}
-
 // ============= Data Fetching =============
 
 export async function _getKeeperData(): Promise<KeeperRunData> {
@@ -301,7 +287,7 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
   return {
     buckets,
     bufferTotal,
-    bufferTarget: bufferTarget,
+    bufferTarget,
     lup: { price: lup, index: lupIndex },
     htp: { price: htp, index: htpIndex },
     price: BigInt(price),
@@ -325,6 +311,21 @@ export async function _calculateBufferTarget(): Promise<bigint> {
   return (toWad(totalAssets, assetDecimals) * bufferRatio) / 10000n;
 }
 
+async function _calculateBufferDeficit(data: KeeperRunData): Promise<bigint> {
+  await _refreshBufferValues(data);
+  const deficit = data.bufferTarget - data.bufferTotal;
+  if (data.bufferTotal >= data.bufferTarget) return 0n;
+
+  return deficit > env.BUFFER_PADDING ? deficit - env.BUFFER_PADDING : 0n;
+}
+
+async function _refreshBufferValues(data: KeeperRunData) {
+  [data.bufferTotal, data.bufferTarget] = await Promise.all([
+    getBufferTotal(),
+    _calculateBufferTarget(),
+  ]);
+}
+
 // ============= Logging =============
 
 function logRunExit(reason: string) {
@@ -335,11 +336,13 @@ async function logFinalState(data: KeeperRunData): Promise<void> {
   const finalBufferTotal = await getBufferTotal();
 
   log.info(
-    { event: 'keeper_run_succeeded' },
-    `Keeper run complete.
-    Buffer total: ${finalBufferTotal}
-    Buffer target: ${data.bufferTarget}
-    Quote token price: ${data.price}
-    Optimal bucket: ${data.optimalBucket}`,
+    {
+      event: 'keeper_run_succeeded',
+      bufferTotal: finalBufferTotal,
+      bufferTarget: data.bufferTarget,
+      quoteTokenPrice: data.price,
+      optimalBucket: data.optimalBucket,
+    },
+    'keeper run complete',
   );
 }

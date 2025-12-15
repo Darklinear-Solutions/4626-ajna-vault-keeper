@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { setBufferRatio, setMockState, useMocks } from '../helpers/vaultHelpers';
 import { getPrice } from '../../src/oracle/price';
 import { getIndexToPrice } from '../../src/ajna/poolInfoUtils';
-import { _calculateBufferTarget, run } from '../../src/keeper';
+import { run } from '../../src/keeper';
 import { getBufferTotal } from '../../src/vault/buffer';
 import { client } from '../../src/utils/client';
 import { lpToValue } from '../../src/vault/vault';
@@ -87,8 +87,6 @@ describe('keeper run success', () => {
     await setBufferRatio(5000n);
     const bufferTotalBefore = await getBufferTotal();
     const optimalBucketBalanceBefore = await lpToValue(4157n);
-    const expectedBufferBalance = await _calculateBufferTarget();
-    const expectedMoveAmount = 12n * 100000000000000000000n;
 
     await run();
 
@@ -96,9 +94,7 @@ describe('keeper run success', () => {
     const optimalBucketBalanceAfter = await lpToValue(4157n);
 
     expect(bufferTotalBefore).toBe(0n);
-    expect(bufferTotalAfter).toBe(expectedBufferBalance);
-    expect(optimalBucketBalanceAfter - optimalBucketBalanceBefore).toBe(
-      expectedMoveAmount - expectedBufferBalance,
-    );
+    expect(bufferTotalAfter).toBe(849999900000000050000n);
+    expect(optimalBucketBalanceAfter - optimalBucketBalanceBefore).toBe(350000099999999950000n);
   });
 });

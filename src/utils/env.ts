@@ -29,6 +29,8 @@ if (process.env.ONCHAIN_ORACLE_PRIMARY === 'true' && !process.env.ONCHAIN_ORACLE
   throw new Error('oracle smart contract address must be specified');
 }
 
+const bufferPadding = process.env.BUFFER_PADDING ?? 100000000000000;
+
 // Assumes LP_DUST = 1e6 + 1, because assetDecimals cannot be queried here.
 // If LP_DUST != 1e6 + 1, MIN_MOVE_AMOUNT should be set as an environment variable.
 const minAmount = process.env.MIN_MOVE_AMOUNT ?? 1000001;
@@ -59,6 +61,7 @@ export const env = {
   RPC_URL: process.env.RPC_URL,
   QUOTE_TOKEN_ADDRESS: process.env.QUOTE_TOKEN_ADDRESS!.toLowerCase(),
   CONFIRMATIONS: process.env.CONFIRMATIONS,
+  BUFFER_PADDING: BigInt(bufferPadding),
   MIN_MOVE_AMOUNT: BigInt(minAmount),
   ORACLE_API_KEY: process.env.ORACLE_API_KEY,
   ORACLE_API_TIER: process.env.ORACLE_API_TIER,

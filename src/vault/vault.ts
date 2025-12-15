@@ -27,13 +27,14 @@ export const getDustThreshold = async () => {
   return sixDecimalThreshold > otherDecimalThreshold ? sixDecimalThreshold : otherDecimalThreshold;
 };
 
+// todo: substitute hardcoded gas values for dynamic values based on estimates
 export const move = (from: bigint, to: bigint, amount: bigint) =>
-  vault().write.move([from, to, amount]);
+  vault().write.move([from, to, amount], { gas: 1_500_000n });
 
 export const moveFromBuffer = (to: bigint, amount: bigint) =>
-  vault().write.moveFromBuffer([to, amount]);
+  vault().write.moveFromBuffer([to, amount], { gas: 1_500_000n });
 
 export const moveToBuffer = (from: bigint, amount: bigint) =>
-  vault().write.moveToBuffer([from, amount]);
+  vault().write.moveToBuffer([from, amount], { gas: 1_500_000n });
 
 export const drain = (index: bigint) => vault().write.drain(index);
