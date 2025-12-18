@@ -15,7 +15,7 @@ import {
 } from '../../src/vault/vault';
 import { getBufferTotal } from '../../src/vault/buffer';
 import { getHtp, getPriceToIndex } from '../../src/ajna/poolInfoUtils';
-import { handleTransaction } from '../../src/utils/transaction';
+import { handleTransaction, getGasWithBuffer } from '../../src/utils/transaction';
 import { client } from '../../src/utils/client.ts';
 import { setBufferRatio } from '../helpers/vaultHelpers.ts';
 
@@ -58,9 +58,6 @@ describe('vault interface', () => {
   });
 });
 
-// These operations may intermittently fail in CI due to Anvil timing issues.
-// Occasionally this occurs locally, but rarely. As a result, these tests have been
-// designed run exclusively in a local environment.
 if (!process.env.CI) {
   describe('vault operations', () => {
     let snapshot: string;
@@ -79,8 +76,9 @@ if (!process.env.CI) {
         getBufferTotal(),
         lpToValue(htpIndex),
       ]);
+      const gas = await getGasWithBuffer('moveFromBuffer', [htpIndex, assets]);
 
-      await handleTransaction(moveFromBuffer(htpIndex, assets), {
+      await handleTransaction(moveFromBuffer(htpIndex, assets, gas), {
         action: 'MoveFromBuffer',
         to: htpIndex,
         amount: assets,
@@ -108,7 +106,9 @@ if (!process.env.CI) {
       ]);
 
       const toAssets = 19999721737n;
-      await handleTransaction(move(htpIndex, toIndex, toAssets), {
+      const gas = await getGasWithBuffer('move', [htpIndex, toIndex, toAssets]);
+
+      await handleTransaction(move(htpIndex, toIndex, toAssets, gas), {
         action: 'Move',
         from: htpIndex,
         to: toIndex,
@@ -137,7 +137,9 @@ if (!process.env.CI) {
       ]);
 
       const toAssets = BigInt(1e10);
-      await handleTransaction(moveToBuffer(htpIndex, toAssets), {
+      const gas = await getGasWithBuffer('moveToBuffer', [htpIndex, toAssets]);
+
+      await handleTransaction(moveToBuffer(htpIndex, toAssets, gas), {
         action: 'MoveToBuffer',
         from: htpIndex,
         amount: toAssets,

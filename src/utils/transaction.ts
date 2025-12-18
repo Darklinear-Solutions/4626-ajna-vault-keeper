@@ -1,8 +1,9 @@
 import { log } from './logger';
 import { client } from './client';
 import { env } from './env';
-import { parseEventLogs, decodeErrorResult, type TransactionReceipt } from 'viem';
+import { getAddress } from './address';
 import { getAbi } from './abi';
+import { parseEventLogs, decodeErrorResult, type TransactionReceipt } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -128,4 +129,34 @@ function abridgedViemError(err: unknown) {
     data: e?.data ?? e?.decoded?.data,
     stack: e?.stack,
   };
+}
+
+export async function getGasWithBuffer(
+  functionName: string,
+  args: readonly unknown[],
+): Promise<bigint> {
+  const defaultGas = 1500000n;
+  const address = await getAddress('vault');
+  const abi = getAbi('vault');
+
+  try {
+    const estimated = await client.estimateContractGas({
+      address,
+      abi,
+      functionName,
+      args,
+    });
+    return estimated + (estimated * env.GAS_BUFFER) / 100n;
+  } catch (err) {
+    log.warn(
+      {
+        event: 'gas_estimation_failed',
+        error: abridgedViemError(err),
+        defaultGas,
+      },
+      `gas estimation failed, falling back to default value: ${defaultGas}`,
+    );
+
+    return defaultGas;
+  }
 }

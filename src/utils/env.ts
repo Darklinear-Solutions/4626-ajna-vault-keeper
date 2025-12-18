@@ -29,6 +29,11 @@ if (process.env.ONCHAIN_ORACLE_PRIMARY === 'true' && !process.env.ONCHAIN_ORACLE
   throw new Error('oracle smart contract address must be specified');
 }
 
+const gasBuffer =
+  !process.env.GAS_BUFFER || BigInt(process.env.GAS_BUFFER) === 0n
+    ? 50n
+    : BigInt(process.env.GAS_BUFFER);
+
 const bufferPadding = process.env.BUFFER_PADDING ?? 100000000000000;
 
 // Assumes LP_DUST = 1e6 + 1, because assetDecimals cannot be queried here.
@@ -62,6 +67,7 @@ export const env = {
   QUOTE_TOKEN_ADDRESS: process.env.QUOTE_TOKEN_ADDRESS!.toLowerCase(),
   CONFIRMATIONS: process.env.CONFIRMATIONS,
   BUFFER_PADDING: BigInt(bufferPadding),
+  GAS_BUFFER: gasBuffer,
   MIN_MOVE_AMOUNT: BigInt(minAmount),
   ORACLE_API_KEY: process.env.ORACLE_API_KEY,
   ORACLE_API_TIER: process.env.ORACLE_API_TIER,

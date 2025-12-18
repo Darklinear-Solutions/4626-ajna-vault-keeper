@@ -1,7 +1,7 @@
 import { env } from './utils/env';
 import { log } from './utils/logger';
 import { toWad } from './utils/decimalConversion';
-import { handleTransaction, type TransactionData } from './utils/transaction';
+import { getGasWithBuffer, handleTransaction, type TransactionData } from './utils/transaction';
 import { getPrice } from './oracle/price';
 import { poolHasBadDebt } from './subgraph/poolHealth';
 import { getBufferTotal } from './vault/buffer';
@@ -155,20 +155,23 @@ function planBucketOperations(
 
 async function executeMoveOperation(op: MoveOperation): Promise<TransactionData> {
   if (op.from === 'Buffer') {
-    return await handleTransaction(moveFromBuffer(op.to as bigint, op.amount), {
-      action: 'MoveFromBuffer',
+    const gas = await getGasWithBuffer('moveFromBuffer', [op.to, op.amount]);
+    return await handleTransaction(moveFromBuffer(op.to as bigint, op.amount, gas), {
+      action: 'moveFromBuffer',
       to: op.to,
       amount: op.amount,
     });
   } else if (op.to === 'Buffer') {
-    return await handleTransaction(moveToBuffer(op.from, op.amount), {
-      action: 'MoveToBuffer',
+    const gas = await getGasWithBuffer('moveToBuffer', [op.from, op.amount]);
+    return await handleTransaction(moveToBuffer(op.from, op.amount, gas), {
+      action: 'moveToBuffer',
       from: op.from,
       amount: op.amount,
     });
   } else {
-    return await handleTransaction(move(op.from, op.to, op.amount), {
-      action: 'Move',
+    const gas = await getGasWithBuffer('move', [op.from, op.to, op.amount]);
+    return await handleTransaction(move(op.from, op.to, op.amount, gas), {
+      action: 'move',
       from: op.from,
       to: op.to,
       amount: op.amount,
@@ -178,7 +181,8 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData>
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
   await drain(targetBucket);
-  await handleTransaction(moveFromBuffer(targetBucket, amount), {
+  const gas = await getGasWithBuffer('moveFromBuffer', [targetBucket, amount]);
+  await handleTransaction(moveFromBuffer(targetBucket, amount, gas), {
     action: 'MoveFromBuffer',
     to: targetBucket,
     amount: amount,
@@ -197,7 +201,8 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
 
     const amountToMove = bucketValue >= remaining ? remaining : bucketValue;
 
-    const txData = await handleTransaction(moveToBuffer(bucket, amountToMove), {
+    const gas = await getGasWithBuffer('moveToBuffer', [bucket, amountToMove]);
+    const txData = await handleTransaction(moveToBuffer(bucket, amountToMove, gas), {
       action: 'MoveToBuffer',
       from: bucket,
       amount: amountToMove,
