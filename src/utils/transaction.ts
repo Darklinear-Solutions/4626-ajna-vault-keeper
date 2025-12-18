@@ -77,6 +77,23 @@ export async function handleTransaction(
     const receipt = (err as any)?.receipt as TransactionReceipt | undefined;
     const phase = receipt ? 'revert' : hash ? 'fail' : 'send';
 
+    if (phase === 'fail' && hash) {
+      const isInsufficientFunds = await _checkInsufficientFunds(hash);
+      if (isInsufficientFunds) {
+        log.error(
+          {
+            event: 'tx_failed',
+            phase: 'insufficient_funds',
+            hash,
+            reason: 'Account does not have enough ETH to cover gas costs',
+            ...context,
+          },
+          'transaction failed: insufficient funds',
+        );
+        return { status, assets };
+      }
+    }
+
     log.error(
       {
         event: 'tx_failed',
@@ -158,5 +175,22 @@ export async function getGasWithBuffer(
     );
 
     return defaultGas;
+  }
+}
+
+async function _checkInsufficientFunds(hash: Hash): Promise<boolean> {
+  try {
+    const tx = await client.getTransaction({ hash }).catch(() => null);
+
+    if (!tx) return true;
+
+    const balance = await client.getBalance({ address: tx.from });
+    const maxGasCost = tx.gas * (tx.maxFeePerGas || tx.gasPrice || 0n);
+
+    if (balance < maxGasCost) return true;
+
+    return false;
+  } catch {
+    return false;
   }
 }
