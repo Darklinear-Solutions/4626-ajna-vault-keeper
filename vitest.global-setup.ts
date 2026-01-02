@@ -6,17 +6,21 @@ import path from 'path';
 
 dotenv.config({ path: '.env.test' });
 process.env.TEST_ENV = 'true';
-process.env.MAINNET_RPC_URL = process.env.RPC_URL;
+if (!process.env.MAINNET_RPC_URL) {
+  process.env.MAINNET_RPC_URL = 'https://eth.drpc.org';
+}
 process.env.RPC_URL = 'http://127.0.0.1:8545';
 process.env.PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-process.env.CHAIN_NAME = 'Ethereum';
+process.env.CHAIN_ID = '1';
 process.env.OPTIMAL_BUCKET_DIFF = '1';
 process.env.ONCHAIN_ORACLE_PRIMARY = 'true';
+process.env.ONCHAIN_ORACLE_ADDRESS='0x74661a9ea74fD04975c6eBc6B155Abf8f885636c';
 process.env.MIN_MOVE_AMOUNT = '1000000';
 process.env.LOG_LEVEL = 'warn';
 process.env.KEEPER_INTERVAL_MS = '43200000';
 process.env.ORACLE_API_URL = 'https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=0x6B175474E89094C44Da98b954EedeAC495271d0F&vs_currencies=usd';
 process.env.QUOTE_TOKEN_ADDRESS = '0x6b175474e89094c44da98b954eedeac495271d0f';
+process.env.FIXED_PRICE = '0';
 
 let anvilProcess: ReturnType<typeof spawn>;
 

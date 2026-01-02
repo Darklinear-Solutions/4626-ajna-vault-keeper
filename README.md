@@ -31,16 +31,17 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
 | ------------------------------ | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
 | `RPC_URL`                      | RPC endpoint used for on-chain interactions.                                     | URL (`https://…`)        | Required                                   | None             |
 | `SUBGRAPH_URL`                 | Subgraph endpoint for pool/vault state queries.                                  | URL (`https://…`)        | Required                                   | None             |
-| `ORACLE_API_URL`               | API endpoint for off-chain price oracle using CoinGecko.                        | URL (`https://…`)        | Required                                   | None             |
+| `ORACLE_API_URL`               | API endpoint for off-chain price oracle using CoinGecko.                        | URL (`https://…`)        | Conditional (if the onchain oracle is not set to primary and no fixed price is set)                                   | None             |
 | `QUOTE_TOKEN_ADDRESS`          | Address of the vault’s quote token.                                              | Ethereum address (`0x…`) | Required                                   | None             |
 | `PRIVATE_KEY`                  | Private key of the keeper’s authorized account.                                  | Hex string (`0x…`)       | Required                                   | None             |
 | `VAULT_ADDRESS`                | Address of the vault contract.                                                   | Ethereum address (`0x…`) | Required                                   | None             |
 | `VAULT_AUTH_ADDRESS`           | Address of the vault auth contract.                                              | Ethereum address (`0x…`) | Required                                   | None             |
 | `KEEPER_INTERVAL_MS`           | Interval between keeper runs.                                                    | Integer (milliseconds)   | Required                                   | 43,200,000 (12hours) |
 | `OPTIMAL_BUCKET_DIFF`          | Offset (in bucket indexes) from current pool price to select the optimal bucket. | Integer                  | Required                                   | 4                |
+| `CHAIN_ID` | Chain ID for the intended network. | Integer | Optional | 1 (Ethereum mainnet) |
 | `CONFIRMATIONS`                | Number of block confirmations to wait for each tx.                               | Integer                  | Optional                                       | 1                |
 | `LOG_LEVEL`                    | Minimum severity of logs (`info`, `warn`, `error`).                              | String                   | Optional                                       | `info`           |
-| `MIN_MOVE_AMOUNT`              | Skip moves if bucket's quote token balance is below this amount (dust limit) - enforced by vault.    | Integer (WAD units)      | Optional                                       | 1,000,000        |
+| `MIN_MOVE_AMOUNT`              | Skip moves if bucket's quote token balance is below this amount (dust limit) - enforced by vault.    | Integer (WAD units)      | Optional                                       | 1,000,001        |
 | `MIN_TIME_SINCE_BANKRUPTCY`    | Minimum time since bucket bankruptcy to be considered valid. Abort keeper run if timestamp is between this value and current time.                     | Integer (seconds)        | Optional                                       | 259,200  (72h)    |
 | `MAX_AUCTION_AGE`              | Only consider auctions with bad debt if they are older than this value.                                    | Integer (seconds)        | Optional                                       | 259,200  (72h)    |
 | `EXIT_ON_SUBGRAPH_FAILURE` | Abort run if the subgraph query fails during the check for bad debt in the pool. | String (`true`/`false`) | Optional | `false`
@@ -50,6 +51,10 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
 | `ONCHAIN_ORACLE_PRIMARY`       | Use on-chain oracle as primary instead of CoinGecko.                             | String (`true`/`false`)   | Optional                                       | false            |
 | `ONCHAIN_ORACLE_MAX_STALENESS` | Max allowed age of on-chain price data.                                          | Integer (seconds)        | Conditional (if `ONCHAIN_ORACLE_PRIMARY=true`) | 43,200 (12h)     |
 | `FUTURE_SKEW_TOLERANCE` | Max clock drift allowed from Chronicle timestamps. | Integer (seconds) |Optional | 120 (2 minutes) |
+| `GAS_BUFFER` | Accounts for occasional Viem gas underestimation for the functions that interact with Ajna, resulting in sporadic `OutOfGas` reversions. | Integer (percentage) | Optional | 50 (50%) |
+| `BUFFER_PADDING` | Accounts for the slight variation in the value of `totalAssets` (due to interest accruing in Ajna). | Integer (`WAD`) | 100000000000000 (1e14) |
+| `FIXED_PRICE` | The keeper can be configured to skip both oracles and use a hard-coded price, defined here. | Float (human-readable price, e.g. `1.00`) | Optional | None |
+| `MAINNET_RPC_URL` | Since the RPC node defined here may refer to any chain, the test suite needs a mainnet RPC for set up. By default, the test suite uses the free node at 'https://eth.drpc.org', but this node is rate-limited, which may cause unexpected test failures. To avoid this, another RPC can be defined here. | String | Optional | None |
 
 
 2. Fetching State:
@@ -111,10 +116,12 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
       * Transactions:
         * `tx_success` - successful tx with hash, block, action (`move`, `moveToBuffer`, `moveFromBuffer`), amount, and from/to buckets.
         * `tx_failed` - failed tx with phase (`send`, `fail`, `revert`), hash, receipt, and context.
+        * `keeper_price_fixed` - keeper is bypassing price fetch and using the value defined in the env.
       * Warnings:
         * `buffer_imbalance` - emitted when the Buffer total does not match the computed bufferTarget after rebalancing (indicating a residual surplus/deficit).
         * `keeper_run_aborted` - emitted when the keeper run exits early for any of the reasons specified above in [Early Fail or Skip Conditions](#exit-conditions).
         * `price_query_failed` - query failed for the first of the two configured price feeds.
+        * `gas_estimation_failed` - Viem gas estimation for vault functions failed, indicating that the keeper will fall back to the hard-coded value.
       * Other errors:
         * `subgraph_query_failed` - query for open auctions via configured subgraph threw an error.
         * `uncaught_exception` - an unhandled error crashed the keeper process.

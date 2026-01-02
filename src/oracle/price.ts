@@ -6,30 +6,35 @@ import { getOnchainPrice } from './onchain.ts';
 
 type PriceSource = () => Promise<bigint | number>;
 
-const SOURCES: Record<'on' | 'off', PriceSource> = {
-  on: getOnchainPrice,
-  off: getOffchainPrice as () => Promise<number>,
+const SOURCES: Record<'onchain' | 'offchain', PriceSource> = {
+  onchain: getOnchainPrice,
+  offchain: getOffchainPrice,
 };
 
 export async function getPrice(): Promise<bigint> {
-  const order: ('on' | 'off')[] = env.ONCHAIN_ORACLE_PRIMARY ? ['on', 'off'] : ['off', 'on'];
+  if (env.FIXED_PRICE && env.FIXED_PRICE > 0) return getFixedPrice(env.FIXED_PRICE);
+
+  const errors: Error[] = [];
+  const order: ('onchain' | 'offchain')[] = env.ONCHAIN_ORACLE_PRIMARY
+    ? ['onchain', 'offchain']
+    : ['offchain', 'onchain'];
 
   for (const tag of order) {
     try {
       const price = await SOURCES[tag]();
-
-      if (typeof price === 'number') {
-        return toAsset(price);
-      } else if (typeof price === 'bigint') {
-        return price;
-      }
+      return typeof price === 'bigint' ? price : toAsset(price);
     } catch (err) {
-      log.warn(
-        { event: 'price_query_failed', err, tag },
-        'primary price source failed, trying secondary source',
-      );
+      const e = new Error(`${tag} price query failed`, { cause: err });
+      errors.push(e);
+      log.warn({ event: 'price_query_failed', err, tag }, `${tag} price query failed`);
     }
   }
 
-  throw new Error('unable to fetch price from either source');
+  throw new AggregateError(errors, 'unable to fetch price from either source');
+}
+
+async function getFixedPrice(rawPrice: number): Promise<bigint> {
+  const price = await toAsset(rawPrice);
+  log.info({ event: 'keeper_price_fixed', rawPrice, price }, `using fixed price: ${price}`);
+  return price;
 }

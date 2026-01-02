@@ -27,13 +27,13 @@ export const getDustThreshold = async () => {
   return sixDecimalThreshold > otherDecimalThreshold ? sixDecimalThreshold : otherDecimalThreshold;
 };
 
-export const move = (from: bigint, to: bigint, amount: bigint) =>
-  vault().write.move([from, to, amount]);
+export const move = (from: bigint, to: bigint, amount: bigint, gas: bigint) =>
+  vault().write.move([from, to, amount], { gas });
 
-export const moveFromBuffer = (to: bigint, amount: bigint) =>
-  vault().write.moveFromBuffer([to, amount]);
+export const moveFromBuffer = (to: bigint, amount: bigint, gas: bigint) =>
+  vault().write.moveFromBuffer([to, amount], { gas });
 
-export const moveToBuffer = (from: bigint, amount: bigint) =>
-  vault().write.moveToBuffer([from, amount]);
+export const moveToBuffer = (from: bigint, amount: bigint, gas: bigint) =>
+  vault().write.moveToBuffer([from, amount], { gas });
 
 export const drain = (index: bigint) => vault().write.drain(index);

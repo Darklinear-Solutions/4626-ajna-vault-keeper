@@ -2,7 +2,6 @@ import 'dotenv/config';
 
 const REQUIRED = [
   'RPC_URL',
-  'ORACLE_API_URL',
   'QUOTE_TOKEN_ADDRESS',
   'PRIVATE_KEY',
   'VAULT_ADDRESS',
@@ -18,6 +17,10 @@ for (const key of REQUIRED) {
   }
 }
 
+if (!process.env.ONCHAIN_ORACLE_PRIMARY && !process.env.FIXED_PRICE) {
+  throw new Error('Oracle API URL must be specified');
+}
+
 if (process.env.ORACLE_API_KEY && !process.env.ORACLE_API_TIER) {
   throw new Error('API key tier must be specified');
 }
@@ -25,6 +28,13 @@ if (process.env.ORACLE_API_KEY && !process.env.ORACLE_API_TIER) {
 if (process.env.ONCHAIN_ORACLE_PRIMARY === 'true' && !process.env.ONCHAIN_ORACLE_ADDRESS) {
   throw new Error('oracle smart contract address must be specified');
 }
+
+const gasBuffer =
+  !process.env.GAS_BUFFER || BigInt(process.env.GAS_BUFFER) === 0n
+    ? 50n
+    : BigInt(process.env.GAS_BUFFER);
+
+const bufferPadding = process.env.BUFFER_PADDING ?? 100000000000000;
 
 // Assumes LP_DUST = 1e6 + 1, because assetDecimals cannot be queried here.
 // If LP_DUST != 1e6 + 1, MIN_MOVE_AMOUNT should be set as an environment variable.
@@ -56,6 +66,8 @@ export const env = {
   RPC_URL: process.env.RPC_URL,
   QUOTE_TOKEN_ADDRESS: process.env.QUOTE_TOKEN_ADDRESS!.toLowerCase(),
   CONFIRMATIONS: process.env.CONFIRMATIONS,
+  BUFFER_PADDING: BigInt(bufferPadding),
+  GAS_BUFFER: gasBuffer,
   MIN_MOVE_AMOUNT: BigInt(minAmount),
   ORACLE_API_KEY: process.env.ORACLE_API_KEY,
   ORACLE_API_TIER: process.env.ORACLE_API_TIER,
@@ -70,4 +82,6 @@ export const env = {
   MAX_AUCTION_AGE: Number(maxAuctionAge),
   FUTURE_SKEW_TOLERANCE: Number(futureSkewTolerance),
   EXIT_ON_SUBGRAPH_FAILURE: exitOnSubgraphFailure,
+  CHAIN_ID: Number(process.env.CHAIN_ID),
+  FIXED_PRICE: process.env.FIXED_PRICE ? Number(process.env.FIXED_PRICE) : undefined,
 };

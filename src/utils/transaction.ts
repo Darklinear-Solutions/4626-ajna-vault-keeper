@@ -1,8 +1,9 @@
 import { log } from './logger';
 import { client } from './client';
 import { env } from './env';
-import { parseEventLogs, type TransactionReceipt } from 'viem';
+import { getAddress } from './address';
 import { getAbi } from './abi';
+import { parseEventLogs, decodeErrorResult, type TransactionReceipt } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -21,9 +22,29 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
   });
 
   if (receipt.status !== 'success') {
-    const e = new Error(`Transaction ${txHash} reverted`);
-    (e as any).receipt = receipt;
-    throw e;
+    const tx = await client.getTransaction({ hash: txHash });
+
+    try {
+      await client.call({
+        to: tx.to!,
+        account: tx.from,
+        data: tx.input,
+        blockNumber: receipt.blockNumber,
+      });
+    } catch (err: any) {
+      const data = err.data;
+      if (data) {
+        let decoded;
+        try {
+          decoded = decodeErrorResult({ abi: getAbi('vault'), data });
+        } catch {
+          decoded = { errorName: 'UnknownRevert', sig: data.slice(0, 10), data };
+        }
+        throw Object.assign(new Error(String(decoded.errorName)), { receipt, decoded, cause: err });
+      }
+    }
+
+    throw Object.assign(new Error(`Transaction ${txHash} reverted`), { receipt });
   }
 
   return receipt;
@@ -56,8 +77,33 @@ export async function handleTransaction(
     const receipt = (err as any)?.receipt as TransactionReceipt | undefined;
     const phase = receipt ? 'revert' : hash ? 'fail' : 'send';
 
+    if (phase === 'fail' && hash) {
+      const isInsufficientFunds = await _checkInsufficientFunds(hash);
+      if (isInsufficientFunds) {
+        log.error(
+          {
+            event: 'tx_failed',
+            phase: 'insufficient_funds',
+            hash,
+            reason: 'Account does not have enough ETH to cover gas costs',
+            ...context,
+          },
+          'transaction failed: insufficient funds',
+        );
+        return { status, assets };
+      }
+    }
+
     log.error(
-      { event: 'tx_failed', phase, hash, block: receipt?.blockNumber, receipt, err, ...context },
+      {
+        event: 'tx_failed',
+        phase,
+        hash,
+        block: receipt?.blockNumber,
+        receipt,
+        err: abridgedViemError(err),
+        ...context,
+      },
       `move failed`,
     );
   }
@@ -84,4 +130,67 @@ function getAmountMoved(receipt: any, action: string) {
   }
 
   return amount;
+}
+
+function abridgedViemError(err: unknown) {
+  const e = err as any;
+
+  return {
+    shortMessage: e?.shortMessage,
+    errorName: e?.decoded?.errorName ?? e?.cause?.errorName ?? e?.errorName,
+    decoded: e?.decoded,
+    contractAddress: e?.contractAddress,
+    functionName: e?.functionName,
+    args: e?.args,
+    sender: e?.sender,
+    data: e?.data ?? e?.decoded?.data,
+    stack: e?.stack,
+  };
+}
+
+export async function getGasWithBuffer(
+  functionName: string,
+  args: readonly unknown[],
+): Promise<bigint> {
+  const defaultGas = 1500000n;
+  const address = await getAddress('vault');
+  const abi = getAbi('vault');
+
+  try {
+    const estimated = await client.estimateContractGas({
+      address,
+      abi,
+      functionName,
+      args,
+    });
+    return estimated + (estimated * env.GAS_BUFFER) / 100n;
+  } catch (err) {
+    log.warn(
+      {
+        event: 'gas_estimation_failed',
+        error: abridgedViemError(err),
+        defaultGas,
+      },
+      `gas estimation failed, falling back to default value: ${defaultGas}`,
+    );
+
+    return defaultGas;
+  }
+}
+
+async function _checkInsufficientFunds(hash: Hash): Promise<boolean> {
+  try {
+    const tx = await client.getTransaction({ hash }).catch(() => null);
+
+    if (!tx) return true;
+
+    const balance = await client.getBalance({ address: tx.from });
+    const maxGasCost = tx.gas * (tx.maxFeePerGas || tx.gasPrice || 0n);
+
+    if (balance < maxGasCost) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
 }
