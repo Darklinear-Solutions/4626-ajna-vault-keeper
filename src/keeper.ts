@@ -97,7 +97,7 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
   const difference = data.bufferTotal - data.bufferTarget;
   const abs = difference >= 0n ? difference : -difference;
 
-  if (abs <= env.BUFFER_PADDING || abs < data.minAmount) return;
+  if (abs <= env.BUFFER_PADDING + data.minAmount) return;
 
   if (difference > 0n) {
     const amount = difference - env.BUFFER_PADDING;
