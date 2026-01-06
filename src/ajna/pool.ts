@@ -1,4 +1,8 @@
 import { contract } from '../utils/contract';
+import { client } from '../utils/client';
+import { env } from '../utils/env';
+import { getPoolAddress } from '../vault/vault';
+import { erc20Abi, type Address } from 'viem';
 
 const pool = contract('pool');
 
@@ -36,4 +40,14 @@ export const isBucketDebtLocked = async (index: bigint): Promise<boolean> => {
   }
 
   return debtLocked;
+};
+
+export const getPoolBalance = async () => {
+  const poolAddress = await getPoolAddress();
+  return client.readContract({
+    address: env.QUOTE_TOKEN_ADDRESS as Address,
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: [poolAddress],
+  });
 };
