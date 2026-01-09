@@ -34,6 +34,8 @@ const gasBuffer =
     ? 50n
     : BigInt(process.env.GAS_BUFFER);
 
+const defaultGas = process.env.DEFAULT_GAS ?? 1500000;
+
 const bufferPadding = process.env.BUFFER_PADDING ?? 100000000000000;
 
 // Assumes LP_DUST = 1e6 + 1, because assetDecimals cannot be queried here.
@@ -68,6 +70,7 @@ export const env = {
   CONFIRMATIONS: process.env.CONFIRMATIONS,
   BUFFER_PADDING: BigInt(bufferPadding),
   GAS_BUFFER: gasBuffer,
+  DEFAULT_GAS: BigInt(defaultGas),
   MIN_MOVE_AMOUNT: BigInt(minAmount),
   ORACLE_API_KEY: process.env.ORACLE_API_KEY,
   ORACLE_API_TIER: process.env.ORACLE_API_TIER,
@@ -84,4 +87,5 @@ export const env = {
   EXIT_ON_SUBGRAPH_FAILURE: exitOnSubgraphFailure,
   CHAIN_ID: Number(process.env.CHAIN_ID),
   FIXED_PRICE: process.env.FIXED_PRICE ? Number(process.env.FIXED_PRICE) : undefined,
+  HALT_KEEPER_IF_LUP_BELOW_HTP: process.env.HALT_KEEPER_IF_LUP_BELOW_HTP === 'false' ? false : true,
 };

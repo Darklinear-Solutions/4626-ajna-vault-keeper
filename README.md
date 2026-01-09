@@ -52,8 +52,10 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
 | `ONCHAIN_ORACLE_MAX_STALENESS` | Max allowed age of on-chain price data.                                          | Integer (seconds)        | Conditional (if `ONCHAIN_ORACLE_PRIMARY=true`) | 43,200 (12h)     |
 | `FUTURE_SKEW_TOLERANCE` | Max clock drift allowed from Chronicle timestamps. | Integer (seconds) |Optional | 120 (2 minutes) |
 | `GAS_BUFFER` | Accounts for occasional Viem gas underestimation for the functions that interact with Ajna, resulting in sporadic `OutOfGas` reversions. | Integer (percentage) | Optional | 50 (50%) |
-| `BUFFER_PADDING` | Accounts for the slight variation in the value of `totalAssets` (due to interest accruing in Ajna). | Integer (`WAD`) | 100000000000000 (1e14) |
+| `DEFAULT_GAS` | Default gas limit in the event that gas estimation with the above buffer fails. | Integer | Optional | 1500000 |
+| `BUFFER_PADDING` | Accounts for the slight variation in the value of `totalAssets` (due to interest accruing in Ajna). | Integer (`WAD`) | Optional | 100000000000000 (1e14) |
 | `FIXED_PRICE` | The keeper can be configured to skip both oracles and use a hard-coded price, defined here. | Float (human-readable price, e.g. `1.00`) | Optional | None |
+| `HALT_KEEPER_IF_LUP_BELOW_HTP` | If operations trigger `LUPBelowHTP` error from Ajna, halt keeper until restarted to prevent more tokens from being added to the pool while move targets are likely to require liquidations. | String (`true` / `false`) | Optional | `true` |
 | `MAINNET_RPC_URL` | Since the RPC node defined here may refer to any chain, the test suite needs a mainnet RPC for set up. By default, the test suite uses the free node at 'https://eth.drpc.org', but this node is rate-limited, which may cause unexpected test failures. To avoid this, another RPC can be defined here. | String | Optional | None |
 
 
@@ -110,7 +112,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
       * `MoveToBuffer(fromBucket, amount)` - vault function and event that withdraws liquidity from a bucket into the Buffer; the keeper uses it to top up the Buffer or cover a deficit.
     * Off-chain logs (pino-formatted JSON; filterable by event field)
       * Logger events:
-        * `keeper_run_succeeded` - final state with buffer total, buffer target, current price, and optimal bucket.
+        * `keeper_run_complete` - final state with buffer total, buffer target, current price, and optimal bucket.
         * `keeper_run_failed` - run aborted with error details.
         * `keeper_stopping` - process shutdown (SIGINT/SIGTERM).
       * Transactions:

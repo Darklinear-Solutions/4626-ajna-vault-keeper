@@ -3,6 +3,7 @@ import { client } from './client';
 import { env } from './env';
 import { getAddress } from './address';
 import { getAbi } from './abi';
+import { haltKeeper } from '../keeper';
 import { parseEventLogs, decodeErrorResult, type TransactionReceipt } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -29,11 +30,18 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
         to: tx.to!,
         account: tx.from,
         data: tx.input,
-        blockNumber: receipt.blockNumber,
       });
     } catch (err: any) {
       const data = err.data;
-      if (data) {
+
+      if (isLupBelowHtp(err)) {
+        if (env.HALT_KEEPER_IF_LUP_BELOW_HTP) haltKeeper();
+        throw Object.assign(
+          new Error(
+            'LUPBelowHTP. Vault funds have been lent out by the pool and cannot be moved. Consider running the AJNA Keeper to check for necessary liquidations.',
+          ),
+        );
+      } else if (data) {
         let decoded;
         try {
           decoded = decodeErrorResult({ abi: getAbi('vault'), data });
@@ -152,7 +160,7 @@ export async function getGasWithBuffer(
   functionName: string,
   args: readonly unknown[],
 ): Promise<bigint> {
-  const defaultGas = 1500000n;
+  const defaultGas = env.DEFAULT_GAS;
   const address = await getAddress('vault');
   const abi = getAbi('vault');
 
@@ -162,13 +170,14 @@ export async function getGasWithBuffer(
       abi,
       functionName,
       args,
+      maxFeePerGas: 1n,
+      maxPriorityFeePerGas: 0n,
     });
     return estimated + (estimated * env.GAS_BUFFER) / 100n;
-  } catch (err) {
+  } catch {
     log.warn(
       {
         event: 'gas_estimation_failed',
-        error: abridgedViemError(err),
         defaultGas,
       },
       `gas estimation failed, falling back to default value: ${defaultGas}`,
@@ -193,4 +202,9 @@ async function _checkInsufficientFunds(hash: Hash): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+function isLupBelowHtp(err: any) {
+  const data = err?.cause?.cause?.data;
+  return data === '0x444507e1';
 }

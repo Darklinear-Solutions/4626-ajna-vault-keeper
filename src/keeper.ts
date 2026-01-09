@@ -1,6 +1,7 @@
 import { env } from './utils/env';
 import { log } from './utils/logger';
 import { toWad } from './utils/decimalConversion';
+import { poolBalanceCap } from './utils/poolBalanceCap';
 import { getGasWithBuffer, handleTransaction, type TransactionData } from './utils/transaction';
 import { getPrice } from './oracle/price';
 import { poolHasBadDebt } from './subgraph/poolHealth';
@@ -44,7 +45,14 @@ type MoveOperation = {
   bucketIndex?: number;
 };
 
+let halted = false;
+export function haltKeeper() {
+  halted = true;
+  log.warn({ event: 'keeper_halted' }, 'keeper halting due to LUPBelowHTP error');
+}
+
 export async function run() {
+  if (halted) return logRunExit('keeper halted');
   if (await isPaused()) return logRunExit('vault is currently paused');
   if (await poolHasBadDebt()) return logRunExit('pool has bad debt');
 
@@ -74,10 +82,11 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
     const bucket = data.buckets[i]!;
     await drain(bucket);
 
-    if (await shouldSkipBucket(bucket, data)) continue;
-
     const bucketValue = await lpToValue(bucket);
-    const operations = planBucketOperations(bucket, bucketValue, bufferNeeded, data, i);
+    const amountToMove = await poolBalanceCap(bucketValue);
+    if (await shouldSkipBucket(bucket, amountToMove, data)) continue;
+
+    const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data, i);
     let results = [];
 
     for (const op of operations) {
@@ -103,7 +112,7 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
     const amount = difference - env.BUFFER_PADDING;
     await moveExcessFromBuffer(amount, data.optimalBucket);
   } else {
-    const amount = -difference - env.BUFFER_PADDING;
+    const amount = await poolBalanceCap(-difference - env.BUFFER_PADDING);
     await fillBufferDeficit(amount, data);
   }
 }
@@ -112,7 +121,7 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
 
 function planBucketOperations(
   bucket: bigint,
-  bucketValue: bigint,
+  amountToMove: bigint,
   bufferNeeded: bigint,
   data: KeeperRunData,
   bucketIndex: number,
@@ -123,14 +132,14 @@ function planBucketOperations(
     operations.push({
       from: bucket,
       to: data.optimalBucket,
-      amount: bucketValue,
+      amount: amountToMove,
       bucketIndex,
     });
-  } else if (bufferNeeded >= bucketValue) {
+  } else if (bufferNeeded >= amountToMove) {
     operations.push({
       from: bucket,
       to: 'Buffer',
-      amount: bucketValue,
+      amount: amountToMove,
       bucketIndex,
     });
   } else {
@@ -143,7 +152,7 @@ function planBucketOperations(
     operations.push({
       from: bucket,
       to: data.optimalBucket,
-      amount: bucketValue - bufferNeeded,
+      amount: amountToMove - bufferNeeded,
       bucketIndex,
     });
   }
@@ -153,7 +162,8 @@ function planBucketOperations(
 
 // ============= Move Execution =============
 
-async function executeMoveOperation(op: MoveOperation): Promise<TransactionData> {
+async function executeMoveOperation(op: MoveOperation): Promise<TransactionData | undefined> {
+  if (halted) return;
   if (op.from === 'Buffer') {
     const gas = await getGasWithBuffer('moveFromBuffer', [op.to, op.amount]);
     return await handleTransaction(moveFromBuffer(op.to as bigint, op.amount, gas), {
@@ -180,6 +190,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData>
 }
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
+  if (halted) return;
   await drain(targetBucket);
   const gas = await getGasWithBuffer('moveFromBuffer', [targetBucket, amount]);
   await handleTransaction(moveFromBuffer(targetBucket, amount, gas), {
@@ -190,6 +201,7 @@ async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promi
 }
 
 async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<void> {
+  if (halted) return;
   let remaining = needed;
 
   for (let i = 0; i < data.buckets.length && remaining > data.minAmount; i++) {
@@ -199,7 +211,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
 
     if (bucketValue < data.minAmount) continue;
 
-    const amountToMove = bucketValue >= remaining ? remaining : bucketValue;
+    const amountToMove = await poolBalanceCap(bucketValue >= remaining ? remaining : bucketValue);
 
     const gas = await getGasWithBuffer('moveToBuffer', [bucket, amountToMove]);
     const txData = await handleTransaction(moveToBuffer(bucket, amountToMove, gas), {
@@ -214,11 +226,13 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
 
 // ============= Validation Functions =============
 
-async function shouldSkipBucket(bucket: bigint, data: KeeperRunData): Promise<boolean> {
+async function shouldSkipBucket(
+  bucket: bigint,
+  amountToMove: bigint,
+  data: KeeperRunData,
+): Promise<boolean> {
   if (bucket === data.optimalBucket) return true;
-
-  const bucketValue = await lpToValue(bucket);
-  if (bucketValue < env.MIN_MOVE_AMOUNT) return true;
+  if (amountToMove < env.MIN_MOVE_AMOUNT) return true;
 
   const bucketPrice = await getIndexToPrice(bucket);
   return await isBucketInRange(bucketPrice, data);
@@ -342,7 +356,7 @@ async function logFinalState(data: KeeperRunData): Promise<void> {
 
   log.info(
     {
-      event: 'keeper_run_succeeded',
+      event: 'keeper_run_complete',
       bufferTotal: finalBufferTotal,
       bufferTarget: data.bufferTarget,
       quoteTokenPrice: data.price,

@@ -77,6 +77,7 @@ async function deployContracts(): Promise<void> {
     process.env.MOCK_VAULT_ADDRESS = addresses.MOCK_VAULT_ADDRESS;
     process.env.MOCK_VAULT_AUTH_ADDRESS = addresses.MOCK_VAULT_AUTH_ADDRESS;
     process.env.MOCK_CHRONICLE_ADDRESS = addresses.MOCK_CHRONICLE_ADDRESS;
+    process.env.INTEGRATION_TEST = 'true';
   } else {
     throw new Error('Deployment addresses file not found');
   }
