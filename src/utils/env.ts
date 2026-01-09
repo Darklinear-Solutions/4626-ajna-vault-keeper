@@ -87,4 +87,5 @@ export const env = {
   EXIT_ON_SUBGRAPH_FAILURE: exitOnSubgraphFailure,
   CHAIN_ID: Number(process.env.CHAIN_ID),
   FIXED_PRICE: process.env.FIXED_PRICE ? Number(process.env.FIXED_PRICE) : undefined,
+  HALT_KEEPER_IF_LUP_BELOW_HTP: process.env.HALT_KEEPER_IF_LUP_BELOW_HTP === 'false' ? false : true,
 };

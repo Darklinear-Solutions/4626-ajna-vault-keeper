@@ -35,7 +35,7 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
       const data = err.data;
 
       if (isLupBelowHtp(err)) {
-        haltKeeper();
+        if (env.HALT_KEEPER_IF_LUP_BELOW_HTP) haltKeeper();
         throw Object.assign(
           new Error(
             'LUPBelowHTP. Vault funds have been lent out by the pool and cannot be moved. Consider running the AJNA Keeper to check for necessary liquidations.',

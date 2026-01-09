@@ -356,7 +356,7 @@ async function logFinalState(data: KeeperRunData): Promise<void> {
 
   log.info(
     {
-      event: 'keeper_run_succeeded',
+      event: 'keeper_run_complete',
       bufferTotal: finalBufferTotal,
       bufferTarget: data.bufferTarget,
       quoteTokenPrice: data.price,
