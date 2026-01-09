@@ -55,7 +55,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
 | `DEFAULT_GAS` | Default gas limit in the event that gas estimation with the above buffer fails. | Integer | Optional | 1500000 |
 | `BUFFER_PADDING` | Accounts for the slight variation in the value of `totalAssets` (due to interest accruing in Ajna). | Integer (`WAD`) | Optional | 100000000000000 (1e14) |
 | `FIXED_PRICE` | The keeper can be configured to skip both oracles and use a hard-coded price, defined here. | Float (human-readable price, e.g. `1.00`) | Optional | None |
-| `HALT_KEEPER_IF_LUP_BELOW_HTP` | If operations trigger `LUPBelowHTP` error from Ajna, halt keeper until restarted to prevent more tokens from being added to the pool while liquidations are pending. | String (`true` / `false`) | Optional | `true` |
+| `HALT_KEEPER_IF_LUP_BELOW_HTP` | If operations trigger `LUPBelowHTP` error from Ajna, halt keeper until restarted to prevent more tokens from being added to the pool while move targets are likely to require liquidations. | String (`true` / `false`) | Optional | `true` |
 | `MAINNET_RPC_URL` | Since the RPC node defined here may refer to any chain, the test suite needs a mainnet RPC for set up. By default, the test suite uses the free node at 'https://eth.drpc.org', but this node is rate-limited, which may cause unexpected test failures. To avoid this, another RPC can be defined here. | String | Optional | None |
 
 
