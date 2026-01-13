@@ -76,7 +76,7 @@ if (!process.env.CI) {
         getBufferTotal(),
         lpToValue(htpIndex),
       ]);
-      const gas = await getGasWithBuffer('moveFromBuffer', [htpIndex, assets]);
+      const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [htpIndex, assets]);
 
       await handleTransaction(moveFromBuffer(htpIndex, assets, gas), {
         action: 'MoveFromBuffer',
@@ -106,7 +106,7 @@ if (!process.env.CI) {
       ]);
 
       const toAssets = 19999721737n;
-      const gas = await getGasWithBuffer('move', [htpIndex, toIndex, toAssets]);
+      const gas = await getGasWithBuffer('vault', 'move', [htpIndex, toIndex, toAssets]);
 
       await handleTransaction(move(htpIndex, toIndex, toAssets, gas), {
         action: 'Move',
@@ -137,7 +137,7 @@ if (!process.env.CI) {
       ]);
 
       const toAssets = BigInt(1e10);
-      const gas = await getGasWithBuffer('moveToBuffer', [htpIndex, toAssets]);
+      const gas = await getGasWithBuffer('vault', 'moveToBuffer', [htpIndex, toAssets]);
 
       await handleTransaction(moveToBuffer(htpIndex, toAssets, gas), {
         action: 'MoveToBuffer',

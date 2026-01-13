@@ -56,9 +56,13 @@ export async function run() {
   if (await isPaused()) return logRunExit('vault is currently paused');
   if (await poolHasBadDebt()) return logRunExit('pool has bad debt');
 
-  await updateInterest();
+  const gas = await getGasWithBuffer('pool', 'updateInterest', []);
+  await handleTransaction(updateInterest(gas), { action: 'updateInterest' });
   const data = await _getKeeperData();
-  await drain(data.optimalBucket);
+  await handleTransaction(drain(data.optimalBucket), {
+    action: 'drain',
+    bucket: data.optimalBucket,
+  });
 
   if (!(await isOptimalBucketInRange(data)))
     return logRunExit('optimal bucket is not in interest-earning range');
@@ -80,7 +84,7 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
 
   for (let i = 0; i < data.buckets.length; i++) {
     const bucket = data.buckets[i]!;
-    await drain(bucket);
+    await handleTransaction(drain(bucket), { action: 'drain', bucket });
 
     const bucketValue = await lpToValue(bucket);
     const amountToMove = await poolBalanceCap(bucketValue);
@@ -165,21 +169,21 @@ function planBucketOperations(
 async function executeMoveOperation(op: MoveOperation): Promise<TransactionData | undefined> {
   if (halted) return;
   if (op.from === 'Buffer') {
-    const gas = await getGasWithBuffer('moveFromBuffer', [op.to, op.amount]);
+    const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [op.to, op.amount]);
     return await handleTransaction(moveFromBuffer(op.to as bigint, op.amount, gas), {
       action: 'moveFromBuffer',
       to: op.to,
       amount: op.amount,
     });
   } else if (op.to === 'Buffer') {
-    const gas = await getGasWithBuffer('moveToBuffer', [op.from, op.amount]);
+    const gas = await getGasWithBuffer('vault', 'moveToBuffer', [op.from, op.amount]);
     return await handleTransaction(moveToBuffer(op.from, op.amount, gas), {
       action: 'moveToBuffer',
       from: op.from,
       amount: op.amount,
     });
   } else {
-    const gas = await getGasWithBuffer('move', [op.from, op.to, op.amount]);
+    const gas = await getGasWithBuffer('vault', 'move', [op.from, op.to, op.amount]);
     return await handleTransaction(move(op.from, op.to, op.amount, gas), {
       action: 'move',
       from: op.from,
@@ -191,10 +195,10 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
   if (halted) return;
-  await drain(targetBucket);
-  const gas = await getGasWithBuffer('moveFromBuffer', [targetBucket, amount]);
+  await handleTransaction(drain(targetBucket), { action: 'drain', bucket: targetBucket });
+  const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [targetBucket, amount]);
   await handleTransaction(moveFromBuffer(targetBucket, amount, gas), {
-    action: 'MoveFromBuffer',
+    action: 'moveFromBuffer',
     to: targetBucket,
     amount: amount,
   });
@@ -206,21 +210,21 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
 
   for (let i = 0; i < data.buckets.length && remaining > data.minAmount; i++) {
     const bucket = data.buckets[i]!;
-    await drain(bucket);
+    await handleTransaction(drain(bucket), { action: 'drain', bucket });
     const bucketValue = await lpToValue(bucket);
 
     if (bucketValue < data.minAmount) continue;
 
     const amountToMove = await poolBalanceCap(bucketValue >= remaining ? remaining : bucketValue);
 
-    const gas = await getGasWithBuffer('moveToBuffer', [bucket, amountToMove]);
+    const gas = await getGasWithBuffer('vault', 'moveToBuffer', [bucket, amountToMove]);
     const txData = await handleTransaction(moveToBuffer(bucket, amountToMove, gas), {
-      action: 'MoveToBuffer',
+      action: 'moveToBuffer',
       from: bucket,
       amount: amountToMove,
     });
 
-    if (txData.status) remaining -= txData.assets;
+    if (txData?.status) remaining -= txData?.assets;
   }
 }
 
@@ -290,7 +294,10 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
   ]);
 
   for (let i = 0; i < initialBuckets.length; i++) {
-    await drain(initialBuckets[i]);
+    await handleTransaction(drain(initialBuckets[i]), {
+      action: 'drain',
+      bucket: initialBuckets[i],
+    });
   }
 
   const [lupIndex, htpIndex, optimalBucket, buckets, bufferTarget] = await Promise.all([

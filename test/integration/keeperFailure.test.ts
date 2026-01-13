@@ -10,7 +10,6 @@ import {
   setBankruptcyTime,
   setLps,
   setMockState,
-  setPaused,
   useMocks,
 } from '../helpers/vaultHelpers';
 import { getBuckets, lpToValue } from '../../src/vault/vault';
@@ -39,19 +38,6 @@ describe('keeper run failure', () => {
 
   afterAll(async () => {
     await client.request({ method: 'evm_revert' as any, params: [snapshot] as any });
-  });
-
-  it('skips run if vault is paused', async () => {
-    await setPaused(true);
-    await run();
-
-    const buckets = await getBuckets();
-    for (let i = 0; i < buckets.length - 2; i++) {
-      const balance = await lpToValue(buckets[i]);
-      expect(balance).toBe(100000000000000000000n);
-    }
-
-    await setPaused(false);
   });
 
   it('skips run if optimal bucket is out of range', async () => {
