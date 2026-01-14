@@ -8,6 +8,7 @@ import {
   getTotalT0DebtInAuction,
   updateInterest,
 } from '../../src/ajna/pool';
+import { getGasWithBuffer } from '../../src/utils/transaction';
 
 describe('Pool interface', () => {
   it('can query bucket info', async () => {
@@ -27,7 +28,8 @@ describe('Pool interface', () => {
 
   it('can update interest', async () => {
     // testing that it doesn't revert
-    await updateInterest();
+    const gas = await getGasWithBuffer('pool', 'updateInterest', []);
+    await updateInterest(gas);
   });
 
   it('can query totalT0DebtInAuction', async () => {

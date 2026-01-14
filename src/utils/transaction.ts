@@ -1,7 +1,7 @@
 import { log } from './logger';
 import { client } from './client';
 import { env } from './env';
-import { getAddress } from './address';
+import { getAddress, type contracts } from './address';
 import { getAbi } from './abi';
 import { haltKeeper } from '../keeper';
 import { parseEventLogs, decodeErrorResult, type TransactionReceipt } from 'viem';
@@ -13,13 +13,14 @@ export type TransactionData = {
   status: boolean;
   assets: bigint;
 };
+type ContractKey = keyof typeof contracts;
 
 const confirmations = Number(env.CONFIRMATIONS ?? 1);
 
 export async function wait(txHash: Hash): Promise<TransactionReceipt> {
   const receipt = await client.waitForTransactionReceipt({
     hash: txHash,
-    confirmations: confirmations,
+    confirmations,
   });
 
   if (receipt.status !== 'success') {
@@ -78,8 +79,15 @@ export async function handleTransaction(
     }
 
     log.info(
-      { event: 'tx_success', hash, block: receipt.blockNumber, assetsMoved: assets, ...context },
-      `move confirmed`,
+      {
+        event: 'tx_success',
+        action: context?.action,
+        hash,
+        block: receipt.blockNumber,
+        assetsMoved: assets,
+        ...context,
+      },
+      `transaction confirmed`,
     );
   } catch (err) {
     const receipt = (err as any)?.receipt as TransactionReceipt | undefined;
@@ -112,7 +120,7 @@ export async function handleTransaction(
         err: abridgedViemError(err),
         ...context,
       },
-      `move failed`,
+      `transaction failed`,
     );
   }
 
@@ -126,7 +134,7 @@ function getAmountMoved(receipt: any, action: string) {
   const vaultAbi = getAbi('vault');
   let amount;
 
-  if (action === 'Move' || action === 'MoveToBuffer') {
+  if (action === 'move' || action === 'moveToBuffer') {
     const logs = parseEventLogs({
       abi: vaultAbi,
       eventName: action,
@@ -157,27 +165,29 @@ function abridgedViemError(err: unknown) {
 }
 
 export async function getGasWithBuffer(
+  contract: ContractKey,
   functionName: string,
   args: readonly unknown[],
 ): Promise<bigint> {
   const defaultGas = env.DEFAULT_GAS;
-  const address = await getAddress('vault');
-  const abi = getAbi('vault');
+  const address = await getAddress(contract);
+  const abi = getAbi(contract);
 
   try {
+    const fees = await client.estimateFeesPerGas();
     const estimated = await client.estimateContractGas({
       address,
       abi,
       functionName,
       args,
-      maxFeePerGas: 1n,
-      maxPriorityFeePerGas: 0n,
+      ...fees,
     });
     return estimated + (estimated * env.GAS_BUFFER) / 100n;
-  } catch {
+  } catch (err) {
     log.warn(
       {
         event: 'gas_estimation_failed',
+        error: abridgedViemError(err),
         defaultGas,
       },
       `gas estimation failed, falling back to default value: ${defaultGas}`,

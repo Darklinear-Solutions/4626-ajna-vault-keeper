@@ -14,7 +14,7 @@ export const getBucketLps = async (index: bigint) => {
   return await bucketInfo[0];
 };
 
-export const updateInterest = () => pool().write.updateInterest();
+export const updateInterest = (gas: bigint) => pool().write.updateInterest({ gas });
 
 export const getTotalT0DebtInAuction = () => pool().read.totalT0DebtInAuction();
 
