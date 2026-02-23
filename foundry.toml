@@ -17,5 +17,3 @@ remappings = [
 
 [rpc_endpoints]
 anvil = "http://127.0.0.1:8545"
-
-solc_version = "0.8.18"
