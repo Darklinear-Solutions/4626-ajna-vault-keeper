@@ -91,6 +91,9 @@ contract DeployScript is Script {
 
         metavault.setSupplyQueue(strategies);
 
+        IERC20(pool.quoteTokenAddress()).approve(address(metavault), type(uint256).max);
+        metavault.deposit(500e18, deployerAddress);
+
         vm.stopBroadcast();
 
         string memory existingContent = vm.readFile('test/script/test-addresses.env');
