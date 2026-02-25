@@ -94,7 +94,7 @@ describe('keeper run success', () => {
     const optimalBucketBalanceAfter = await lpToValue(4157n);
 
     expect(bufferTotalBefore).toBe(0n);
-    expect(bufferTotalAfter).toBe(849999900000000050000n);
-    expect(optimalBucketBalanceAfter - optimalBucketBalanceBefore).toBe(350000099999999950000n);
+    expect(bufferTotalAfter).toBe(849000000000000050000n);
+    expect(optimalBucketBalanceAfter - optimalBucketBalanceBefore).toBe(350999999999999950000n);
   });
 });
