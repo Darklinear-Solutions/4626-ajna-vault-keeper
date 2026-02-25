@@ -7,6 +7,7 @@ import {ATokenVaultFactory} from 'Aave-Vault/src/ATokenVaultFactory.sol';
 import {ATokenVaultRevenueSplitterOwner} from 'Aave-Vault/src/ATokenVaultRevenueSplitterOwner.sol';
 import {IPoolAddressesProvider} from '@aave-v3-core/interfaces/IPoolAddressesProvider.sol';
 import {IERC20} from 'openzeppelin-contracts/token/ERC20/IERC20.sol';
+import {IERC4626} from 'openzeppelin-contracts/token/ERC20/extensions/ERC4626.sol';
 import {MockPerspective} from '../mocks/contracts/MockPerspective.sol';
 import {ProxyAdmin} from '@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol';
 
@@ -28,6 +29,10 @@ contract DeployScript is Script {
         address aTokenVaultAddress;
         EulerEarnFactory metavaultFactory;
         IEulerEarn metavault;
+
+        address ark1 = vm.envAddress('ARK_1_ADDRESS');
+        address ark2 = vm.envAddress('ARK_2_ADDRESS');
+        address ark3 = vm.envAddress('ARK_3_ADDRESS');
 
         vm.startBroadcast(deployerPrivateKey);
 
@@ -72,6 +77,19 @@ contract DeployScript is Script {
         });
 
         aTokenVaultAddress = aaveFactory.deployVault(aaveParams);
+
+        IERC4626[] memory strategies = new IERC4626[](4);
+        strategies[0] = IERC4626(aTokenVaultAddress);
+        strategies[1] = IERC4626(ark1);
+        strategies[2] = IERC4626(ark2);
+        strategies[3] = IERC4626(ark3);
+
+        for (uint i = 0; i < strategies.length; i++) {
+            metavault.submitCap(strategies[i], type(uint136).max);
+            metavault.acceptCap(strategies[i]);
+        }
+
+        metavault.setSupplyQueue(strategies);
 
         vm.stopBroadcast();
 
