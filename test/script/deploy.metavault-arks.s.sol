@@ -57,7 +57,6 @@ contract DeployScript is Script {
 
         vm.stopBroadcast();
 
-        // string memory existingContent = vm.readFile('test/script/test-addresses.env');
         string memory addresses = string.concat(
             'ARK_1_ADDRESS=',
             vm.toString(address(ark1)),
