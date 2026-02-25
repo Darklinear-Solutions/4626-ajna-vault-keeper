@@ -46,54 +46,76 @@ async function deployContracts(): Promise<void> {
     }),
   });
 
-  let script;
+  let scripts = [];
 
   if (process.env.INTEGRATION === 'true') {
-    script = 'test/script/deploy.integration.s.sol:DeployScript';
+    scripts[0] = 'test/script/deploy.integration.s.sol:DeployScript';
   } else if (process.env.METAVAULT === 'true') {
-    script = 'test/script/deploy.metavault.s.sol:DeployScript';
+    scripts[0] = 'test/script/deploy.metavault-arks.s.sol:DeployScript';
+    scripts[1] = 'test/script/deploy.metavault-external.s.sol:DeployScript';
   } else {
-    script = 'test/script/deploy.unit.s.sol:DeployScript';
-  }
-  // const script = process.env.INTEGRATION === 'true' ? 'test/script/deploy.integration.s.sol:DeployScript' : 'test/script/deploy.unit.s.sol:DeployScript';
-
-  const res = spawnSync(
-    forgePath,
-    [
-      'script',
-      script,
-      '--rpc-url',
-      'http://127.0.0.1:8545',
-      '--broadcast',
-      '--skip-simulation',
-      '--private-key',
-      process.env.PRIVATE_KEY!,
-      '--json',
-      '-vvvv',
-    ],
-    {
-      cwd: process.cwd(),
-      env: { ...process.env, FOUNDRY_PROFILE: 'default' },
-      stdio: process.env.TESTS === 'verbose' ? 'inherit' : 'pipe',
-    },
-  );
-
-  if (res.status !== 0) {
-    throw new Error(
-      `forge script failed (${res.status}).\nstdout:\n${res.stdout?.toString()}\nstderr:\n${res.stderr?.toString()}`,
-    );
+    scripts[0] = 'test/script/deploy.unit.s.sol:DeployScript';
   }
 
   const addressesFile = path.join(process.cwd(), './test/script/test-addresses.env');
+  fs.writeFileSync(addressesFile, '');
+
+  for (let i = 0; i < scripts.length; i++) {
+    const scriptAddresses =
+      i > 0 && fs.existsSync(addressesFile)
+        ? dotenv.parse(fs.readFileSync(addressesFile, 'utf-8'))
+        : {};
+
+    const res = spawnSync(
+      forgePath,
+      [
+        'script',
+        scripts[i] as string,
+        '--rpc-url',
+        'http://127.0.0.1:8545',
+        '--broadcast',
+        '--skip-simulation',
+        '--private-key',
+        process.env.PRIVATE_KEY!,
+        '--json',
+        '-vvvv',
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, ...scriptAddresses, FOUNDRY_PROFILE: 'default' },
+        stdio: process.env.TESTS === 'verbose' ? 'inherit' : 'pipe',
+        maxBuffer: 100 * 1024 * 1024,
+      },
+    );
+
+    if (res.status !== 0) {
+      throw new Error(
+        `forge script failed (${res.status}).\nstdout:\n${res.stdout?.toString()}\nstderr:\n${res.stderr?.toString()}`,
+      );
+    }
+  }
+
   if (fs.existsSync(addressesFile)) {
     const addressesContent = fs.readFileSync(addressesFile, 'utf-8');
     const addresses = dotenv.parse(addressesContent);
-    process.env.VAULT_ADDRESS = addresses.VAULT_ADDRESS;
-    process.env.VAULT_AUTH_ADDRESS = addresses.VAULT_AUTH_ADDRESS;
-    process.env.MOCK_VAULT_ADDRESS = addresses.MOCK_VAULT_ADDRESS;
-    process.env.MOCK_VAULT_AUTH_ADDRESS = addresses.MOCK_VAULT_AUTH_ADDRESS;
-    process.env.MOCK_CHRONICLE_ADDRESS = addresses.MOCK_CHRONICLE_ADDRESS;
-    process.env.INTEGRATION_TEST = 'true';
+
+    if (process.env.METAVAULT !== 'true') {
+      process.env.VAULT_ADDRESS = addresses.VAULT_ADDRESS;
+      process.env.VAULT_AUTH_ADDRESS = addresses.VAULT_AUTH_ADDRESS;
+      process.env.MOCK_VAULT_ADDRESS = addresses.MOCK_VAULT_ADDRESS;
+      process.env.MOCK_VAULT_AUTH_ADDRESS = addresses.MOCK_VAULT_AUTH_ADDRESS;
+      process.env.MOCK_CHRONICLE_ADDRESS = addresses.MOCK_CHRONICLE_ADDRESS;
+      process.env.INTEGRATION_TEST = 'true';
+    } else {
+      process.env.METAVAULT_ADDRESS = addresses.METAVAULT_ADDRESS;
+      process.env.AAVE_VAULT_ADDRESS = addresses.AAVE_VAULT_ADDRESS;
+      process.env.ARK_1_ADDRESS = addresses.ARK_1_ADDRESS;
+      process.env.ARK_2_ADDRESS = addresses.ARK_2_ADDRESS;
+      process.env.ARK_3_ADDRESS = addresses.ARK_3_ADDRESS;
+      process.env.ARK_AUTH_1_ADDRESS = addresses.ARK_AUTH_1_ADDRESS;
+      process.env.ARK_AUTH_2_ADDRESS = addresses.ARK_AUTH_2_ADDRESS;
+      process.env.ARK_AUTH_3_ADDRESS = addresses.ARK_AUTH_3_ADDRESS;
+    }
   } else {
     throw new Error('Deployment addresses file not found');
   }
