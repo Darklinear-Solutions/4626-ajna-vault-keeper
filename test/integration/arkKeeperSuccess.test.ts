@@ -1,19 +1,23 @@
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { setBufferRatio, setMockState, useMocks } from '../helpers/vaultHelpers';
 import { getPrice } from '../../src/oracle/price';
-import { getIndexToPrice } from '../../src/ajna/poolInfoUtils';
+import { createVault } from '../../src/ark/vault';
 import { run } from '../../src/keepers/arkKeeper';
-import { getBufferTotal } from '../../src/ark/buffer';
 import { client } from '../../src/utils/client';
-import { lpToValue } from '../../src/ark/vault';
+import type { Address } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 describe('keeper run success', () => {
   let snapshot: string;
+  let vault: ReturnType<typeof createVault>;
 
   beforeAll(async () => {
     snapshot = await client.request({ method: 'evm_snapshot' as any, params: [] as any });
     useMocks();
+    vault = createVault(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
   });
 
   beforeEach(async () => {
@@ -50,26 +54,26 @@ describe('keeper run success', () => {
     // Twelve buckets expected for move, each with starting balance of 100000000000000000000n
     const expectedMoveAmount = 12n * 100000000000000000000n;
 
-    const optimalBucketBalanceBefore = await lpToValue(4157n);
-    const dustyBucketBefore = await lpToValue(4149n);
+    const optimalBucketBalanceBefore = await vault.lpToValue(4157n);
+    const dustyBucketBefore = await vault.lpToValue(4149n);
 
-    await run();
+    await run(process.env.MOCK_VAULT_ADDRESS as Address, process.env.MOCK_VAULT_AUTH_ADDRESS as Address);
 
-    const optimalBucketBalanceAfter = await lpToValue(4157n);
-    const dustyBucketAfter = await lpToValue(4149n);
+    const optimalBucketBalanceAfter = await vault.lpToValue(4157n);
+    const dustyBucketAfter = await vault.lpToValue(4149n);
 
     for (let i = 0; i < expectedMovedBuckets.length; i++) {
-      const bucketPrice = await getIndexToPrice(expectedMovedBuckets[i]!);
+      const bucketPrice = await vault.getIndexToPrice(expectedMovedBuckets[i]!);
       const bucketPriceExpectation = bucketPrice < htp || bucketPrice > currentPrice;
-      const balance = await lpToValue(expectedMovedBuckets[i]!);
+      const balance = await vault.lpToValue(expectedMovedBuckets[i]!);
 
       expect(bucketPriceExpectation).toBe(true);
       expect(balance).toBe(0n);
     }
 
     for (let i = 0; i < expectedUnmovedBuckets.length; i++) {
-      const bucketPrice = await getIndexToPrice(expectedUnmovedBuckets[i]!);
-      const balance = await lpToValue(expectedUnmovedBuckets[i]!);
+      const bucketPrice = await vault.getIndexToPrice(expectedUnmovedBuckets[i]!);
+      const balance = await vault.lpToValue(expectedUnmovedBuckets[i]!);
 
       expect(bucketPrice).toBeGreaterThan(htp);
       expect(bucketPrice).toBeLessThanOrEqual(currentPrice);
@@ -85,13 +89,13 @@ describe('keeper run success', () => {
 
   it('refills buffer before optimal bucket when necessary', async () => {
     await setBufferRatio(5000n);
-    const bufferTotalBefore = await getBufferTotal();
-    const optimalBucketBalanceBefore = await lpToValue(4157n);
+    const bufferTotalBefore = await vault.getBufferTotal();
+    const optimalBucketBalanceBefore = await vault.lpToValue(4157n);
 
-    await run();
+    await run(process.env.MOCK_VAULT_ADDRESS as Address, process.env.MOCK_VAULT_AUTH_ADDRESS as Address);
 
-    const bufferTotalAfter = await getBufferTotal();
-    const optimalBucketBalanceAfter = await lpToValue(4157n);
+    const bufferTotalAfter = await vault.getBufferTotal();
+    const optimalBucketBalanceAfter = await vault.lpToValue(4157n);
 
     expect(bufferTotalBefore).toBe(0n);
     expect(Number(bufferTotalAfter) / 1e18).toBeCloseTo(849e18 / 1e18, -1);

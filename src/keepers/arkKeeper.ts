@@ -39,14 +39,14 @@ export function haltKeeper() {
 
 let vault = createVault();
 
-export async function run(address?: Address) {
-  vault = createVault(address);
+export async function run(address?: Address, vaultAuthAddress?: Address) {
+  vault = createVault(address, vaultAuthAddress);
 
   if (halted) return logRunExit('keeper halted');
   if (await vault.isPaused()) return logRunExit('vault is currently paused');
   if (await poolHasBadDebt(vault)) return logRunExit('pool has bad debt');
 
-  const gas = await getGasWithBuffer('pool', 'updateInterest', []);
+  const gas = await getGasWithBuffer('pool', 'updateInterest', [], await vault.getPoolAddress());
   await handleTransaction(vault.updateInterest(gas), { action: 'updateInterest' });
   const data = await _getKeeperData();
   await handleTransaction(vault.drain(data.optimalBucket), {

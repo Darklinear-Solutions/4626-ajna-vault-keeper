@@ -1,7 +1,7 @@
 import type { Address } from 'viem';
-import { contract } from '../utils/contract.ts';
+import { contract } from '../utils/contract';
 
-export function createVaultAuth(address?: Address) {
+export function createVaultAuth(address: Address) {
   const vaultAuth = contract('vaultAuth', address);
 
   return {
@@ -9,8 +9,3 @@ export function createVaultAuth(address?: Address) {
     getMinBucketIndex: () => vaultAuth().read.minBucketIndex(),
   };
 }
-
-const _default = createVaultAuth();
-
-export const getBufferRatio = () => _default.getBufferRatio();
-export const getMinBucketIndex = () => _default.getMinBucketIndex();

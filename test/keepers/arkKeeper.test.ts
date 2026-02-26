@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { _calculateBufferTarget, _calculateOptimalBucket } from '../../src/keepers/arkKeeper';
 import { getPrice } from '../../src/oracle/price';
-import { getIndexToPrice, getPriceToIndex } from '../../src/ajna/poolInfoUtils';
+import { createVault } from '../../src/ark/vault';
+import type { Address } from 'viem';
+
+const vault = createVault(
+  process.env.VAULT_ADDRESS as Address,
+  process.env.VAULT_AUTH_ADDRESS as Address,
+);
 
 describe('keeper calculations', () => {
   it('correctly calculates buffer target', async () => {
@@ -11,9 +17,9 @@ describe('keeper calculations', () => {
 
   it('correctly calculates optimal bucket', async () => {
     const price = await getPrice();
-    const currentBucket = await getPriceToIndex(price);
+    const currentBucket = await vault.getPriceToIndex(price);
     const newBucket = await _calculateOptimalBucket(price);
-    const newBucketPrice = await getIndexToPrice(newBucket);
+    const newBucketPrice = await vault.getIndexToPrice(newBucket);
     expect(newBucket).toBeGreaterThan(currentBucket);
     expect(newBucketPrice).toBeLessThan(price);
   });

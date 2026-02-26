@@ -5,8 +5,8 @@ import { contract } from '../utils/contract';
 const buffer = (bufferAddress: Address) => contract('buffer', bufferAddress);
 
 export function createVault(address?: Address, vaultAuthAddress?: Address) {
-  const vault = contract('vault', address);
-  const vaultAuth = contract('vaultAuth', vaultAuthAddress);
+  const vault = address ? contract('vault', address) : contract('vault');
+  const vaultAuth = vaultAuthAddress ? contract('vaultAuth', vaultAuthAddress) : contract('vaultAuth');
 
   let _poolInfoUtilsFn: (() => any) | undefined;
   let _poolFn: (() => any) | undefined;
@@ -82,13 +82,16 @@ export function createVault(address?: Address, vaultAuthAddress?: Address) {
     getBucketInfo: async (index: bigint) => (await getPool()).read.bucketInfo([index]),
     getBankruptcyTime: async (index: bigint) => {
       const bucketInfo = await (await getPool()).read.bucketInfo([index]);
-      return bucketInfo[2];
+      return (bucketInfo as any)[2];
     },
     getBucketLps: async (index: bigint) => {
       const bucketInfo = await (await getPool()).read.bucketInfo([index]);
-      return bucketInfo[0];
+      return (bucketInfo as any)[0];
     },
     updateInterest: async (gas: bigint) => (await getPool()).write.updateInterest({ gas }),
+    getTotalT0DebtInAuction: async () => (await getPool()).read.totalT0DebtInAuction(),
+    getInflatorInfo: async () => (await getPool()).read.inflatorInfo(),
+    getDepositIndex: async (debt: bigint) => (await getPool()).read.depositIndex(debt),
     isBucketDebtLocked: async (index: bigint): Promise<boolean> => {
       const t0DebtInAuction = (await (await getPool()).read.totalT0DebtInAuction()) as bigint;
       if (t0DebtInAuction === 0n) return false;
@@ -100,22 +103,3 @@ export function createVault(address?: Address, vaultAuthAddress?: Address) {
     },
   };
 }
-
-const _default = createVault();
-
-export const getBuckets = () => _default.getBuckets();
-export const getAssetDecimals = () => _default.getAssetDecimals();
-export const getTotalAssets = () => _default.getTotalAssets();
-export const getPoolInfoUtilsAddress = () => _default.getPoolInfoUtilsAddress();
-export const getBufferAddress = () => _default.getBufferAddress();
-export const getPoolAddress = () => _default.getPoolAddress();
-export const isPaused = () => _default.isPaused();
-export const lpToValue = (bucket: bigint) => _default.lpToValue(bucket);
-export const getDustThreshold = () => _default.getDustThreshold();
-export const move = (from: bigint, to: bigint, amount: bigint, gas: bigint) =>
-  _default.move(from, to, amount, gas);
-export const moveFromBuffer = (to: bigint, amount: bigint, gas: bigint) =>
-  _default.moveFromBuffer(to, amount, gas);
-export const moveToBuffer = (from: bigint, amount: bigint, gas: bigint) =>
-  _default.moveToBuffer(from, amount, gas);
-export const drain = (index: bigint) => _default.drain(index);

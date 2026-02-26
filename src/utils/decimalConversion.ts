@@ -1,5 +1,3 @@
-import { getAssetDecimals } from '../ark/vault';
-
 export function toWad(rawValue: bigint, assetDecimals: number): bigint {
   const decimals = BigInt(assetDecimals);
 
@@ -12,7 +10,8 @@ export function toWad(rawValue: bigint, assetDecimals: number): bigint {
   }
 }
 
-export async function toAsset(rawValue: number): Promise<bigint> {
-  const assetDecimals = await getAssetDecimals();
-  return BigInt(rawValue * 10 ** assetDecimals);
+// Oracle prices are always compared against WAD-scaled Ajna bucket prices,
+// so we always scale to 18 decimals regardless of the quote token's decimals.
+export function toAsset(rawValue: number): bigint {
+  return BigInt(Math.round(rawValue * 1e18));
 }

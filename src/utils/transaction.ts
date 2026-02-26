@@ -2,9 +2,9 @@ import { log } from './logger';
 import { client } from './client';
 import { env } from './env';
 import { getAddress, type contracts } from './address';
-import { getAbi } from './abi';
+import { getAbi, type ContractAbiKey } from './abi';
 import { haltKeeper } from '../keepers/arkKeeper';
-import { parseEventLogs, decodeErrorResult, type TransactionReceipt } from 'viem';
+import { parseEventLogs, decodeErrorResult, type TransactionReceipt, type Address } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -165,18 +165,19 @@ function abridgedViemError(err: unknown) {
 }
 
 export async function getGasWithBuffer(
-  contract: ContractKey,
+  contract: ContractKey | ContractAbiKey,
   functionName: string,
   args: readonly unknown[],
+  address?: Address,
 ): Promise<bigint> {
   const defaultGas = env.DEFAULT_GAS;
-  const address = await getAddress(contract);
-  const abi = getAbi(contract);
+  const resolvedAddress = address ?? (await getAddress(contract as ContractKey));
+  const abi = getAbi(contract as ContractAbiKey);
 
   try {
     const fees = await client.estimateFeesPerGas();
     const estimated = await client.estimateContractGas({
-      address,
+      address: resolvedAddress,
       abi,
       functionName,
       args,

@@ -1,11 +1,29 @@
-import { contract } from '../../src/utils/contract.ts';
+import { contract } from '../../src/utils/contract';
+import { createVault } from '../../src/ark/vault';
 import type { Address } from 'viem';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const vaultAuth = contract('vaultAuth');
 const chronicle = contract('chronicle');
-const poolInfoUtils = contract('poolInfoUtils');
 const vault = contract('vault');
-const pool = contract('pool');
+
+function getVaultAddr(): Address {
+  return (
+    process.env.USE_MOCKS === 'true' ? process.env.MOCK_VAULT_ADDRESS : process.env.VAULT_ADDRESS
+  ) as Address;
+}
+
+const getPool = async () => {
+  const poolAddr = await createVault(getVaultAddr()).getPoolAddress();
+  return contract('pool', poolAddr)();
+};
+
+const getPoolInfoUtils = async () => {
+  const v = createVault(getVaultAddr());
+  const addr = (await v.getPoolInfoUtilsAddress()) as Address;
+  return contract('poolInfoUtils', addr)();
+};
 
 export const setBufferRatio = (ratio: bigint) => vaultAuth().write.setBufferRatio([ratio]);
 export const setMinBucketIndex = (index: bigint) => vaultAuth().write.setMinBucketIndex([index]);
@@ -14,17 +32,18 @@ export const setPaused = (status: boolean) => vault().write.setPaused(status);
 
 const _setPrice = (price: bigint) => chronicle().write.setPrice(price);
 
-export const setBankruptcyTime = (timestamp: bigint) => pool().write.setBankruptcyTime(timestamp);
-export const setLps = (lps: bigint) => pool().write.setLps(lps);
+export const setBankruptcyTime = async (timestamp: bigint) =>
+  (await getPool()).write.setBankruptcyTime(timestamp);
+export const setLps = async (lps: bigint) => (await getPool()).write.setLps(lps);
 
-export const setAuctionStatus = (
+export const setAuctionStatus = async (
   borrower: Address,
   kickTime: bigint,
   collateral: bigint,
   debt: bigint,
-) => poolInfoUtils().write.setAuctionStatus(borrower, kickTime, collateral, debt);
-const _setLup = (lup: bigint) => poolInfoUtils().write.setLup(lup);
-const _setHtp = (htp: bigint) => poolInfoUtils().write.setHtp(htp);
+) => (await getPoolInfoUtils()).write.setAuctionStatus(borrower, kickTime, collateral, debt);
+const _setLup = async (lup: bigint) => (await getPoolInfoUtils()).write.setLup(lup);
+const _setHtp = async (htp: bigint) => (await getPoolInfoUtils()).write.setHtp(htp);
 
 const _addBucket = (index: bigint, price: bigint, amount: bigint) =>
   vault().write.addBucket(index, price, amount);

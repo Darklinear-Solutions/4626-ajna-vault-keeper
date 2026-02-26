@@ -19,7 +19,9 @@ const isOpts = (x: any) =>
     'blockNumber' in x ||
     'blockTag' in x);
 
-export function contract<K extends ContractAbiKey & ContractAddressKey>(name: K, address?: Address) {
+export function contract<K extends ContractAbiKey & ContractAddressKey>(name: K): () => any;
+export function contract<K extends ContractAbiKey>(name: K, address: Address): () => any;
+export function contract<K extends ContractAbiKey>(name: K, address?: Address): () => any {
   let memo: { addr?: Address; env?: 'real' | 'mock' } = {};
   const envKey = () => (process.env.USE_MOCKS === 'true' ? 'mock' : 'real');
 
@@ -27,7 +29,7 @@ export function contract<K extends ContractAbiKey & ContractAddressKey>(name: K,
     if (address) return address;
     const k = envKey();
     if (memo.addr && memo.env === k) return memo.addr!;
-    const a = (await getAddress(name)) as Address;
+    const a = (await getAddress(name as unknown as ContractAddressKey)) as Address;
     memo = { addr: a, env: k };
     return a;
   };
