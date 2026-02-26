@@ -57,7 +57,10 @@ describe('keeper run success', () => {
     const optimalBucketBalanceBefore = await vault.lpToValue(4157n);
     const dustyBucketBefore = await vault.lpToValue(4149n);
 
-    await run(process.env.MOCK_VAULT_ADDRESS as Address, process.env.MOCK_VAULT_AUTH_ADDRESS as Address);
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
     const optimalBucketBalanceAfter = await vault.lpToValue(4157n);
     const dustyBucketAfter = await vault.lpToValue(4149n);
@@ -92,7 +95,10 @@ describe('keeper run success', () => {
     const bufferTotalBefore = await vault.getBufferTotal();
     const optimalBucketBalanceBefore = await vault.lpToValue(4157n);
 
-    await run(process.env.MOCK_VAULT_ADDRESS as Address, process.env.MOCK_VAULT_AUTH_ADDRESS as Address);
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
     const bufferTotalAfter = await vault.getBufferTotal();
     const optimalBucketBalanceAfter = await vault.lpToValue(4157n);

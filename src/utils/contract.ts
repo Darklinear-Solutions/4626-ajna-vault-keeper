@@ -19,9 +19,11 @@ const isOpts = (x: any) =>
     'blockNumber' in x ||
     'blockTag' in x);
 
-export function contract<K extends ContractAbiKey & ContractAddressKey>(name: K): () => any;
-export function contract<K extends ContractAbiKey>(name: K, address: Address): () => any;
-export function contract<K extends ContractAbiKey>(name: K, address?: Address): () => any {
+export function contract<K extends ContractAbiKey>(
+  name: K,
+  ...args: K extends ContractAddressKey ? [address?: Address] : [address: Address]
+): () => any {
+  const address = args[0];
   let memo: { addr?: Address; env?: 'real' | 'mock' } = {};
   const envKey = () => (process.env.USE_MOCKS === 'true' ? 'mock' : 'real');
 

@@ -15,7 +15,9 @@ const vault = createVault(
 describe('vault interface', () => {
   it('can query buckets', async () => {
     const buckets = await vault.getBuckets();
-    expect(buckets).toSatisfy((val: any) => (val.length === 1 && val[0] === 4161n) || val.length === 0);
+    expect(buckets).toSatisfy(
+      (val: any) => (val.length === 1 && val[0] === 4161n) || val.length === 0,
+    );
   });
 
   it('can query asset decimals', async () => {
@@ -137,7 +139,7 @@ if (!process.env.CI) {
       });
 
       const [afterBufferBalance, afterHtpQts] = await Promise.all([
-        vault.getBufferTotal() as any,
+        vault.getBufferTotal() as Promise<bigint>,
         vault.lpToValue(htpIndex),
       ]);
 

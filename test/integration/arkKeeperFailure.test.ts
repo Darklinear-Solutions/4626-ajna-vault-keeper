@@ -48,7 +48,10 @@ describe('keeper run failure', () => {
 
   it('skips run if optimal bucket is out of range', async () => {
     env.OPTIMAL_BUCKET_DIFF = 15n;
-    await run(process.env.MOCK_VAULT_ADDRESS as Address, process.env.MOCK_VAULT_AUTH_ADDRESS as Address);
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
     const buckets = await vault.getBuckets();
     for (let i = 0; i < buckets.length - 2; i++) {
@@ -61,7 +64,10 @@ describe('keeper run failure', () => {
 
   it('skips run if optimal bucket is dusty', async () => {
     await setLps(100000n);
-    await run(process.env.MOCK_VAULT_ADDRESS as Address, process.env.MOCK_VAULT_AUTH_ADDRESS as Address);
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
     const buckets = await vault.getBuckets();
     for (let i = 0; i < buckets.length - 2; i++) {
@@ -79,7 +85,10 @@ describe('keeper run failure', () => {
     });
 
     await setAuctionStatus(borrower, kickTime, 0n, 1000000000n);
-    await run(process.env.MOCK_VAULT_ADDRESS as Address, process.env.MOCK_VAULT_AUTH_ADDRESS as Address);
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
     const buckets = await vault.getBuckets();
     for (let i = 0; i < buckets.length - 2; i++) {
@@ -92,7 +101,10 @@ describe('keeper run failure', () => {
     const bankruptcyTime = BigInt(Math.floor(Date.now() / 1000) - 86400);
     await setBankruptcyTime(bankruptcyTime);
 
-    await run(process.env.MOCK_VAULT_ADDRESS as Address, process.env.MOCK_VAULT_AUTH_ADDRESS as Address);
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
     const buckets = await vault.getBuckets();
     for (let i = 0; i < buckets.length - 2; i++) {

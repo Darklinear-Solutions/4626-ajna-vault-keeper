@@ -6,7 +6,9 @@ const buffer = (bufferAddress: Address) => contract('buffer', bufferAddress);
 
 export function createVault(address?: Address, vaultAuthAddress?: Address) {
   const vault = address ? contract('vault', address) : contract('vault');
-  const vaultAuth = vaultAuthAddress ? contract('vaultAuth', vaultAuthAddress) : contract('vaultAuth');
+  const vaultAuth = vaultAuthAddress
+    ? contract('vaultAuth', vaultAuthAddress)
+    : contract('vaultAuth');
 
   let _poolInfoUtilsFn: (() => any) | undefined;
   let _poolFn: (() => any) | undefined;
@@ -69,10 +71,8 @@ export function createVault(address?: Address, vaultAuthAddress?: Address) {
     getMinBucketIndex: () => vaultAuth().read.minBucketIndex(),
 
     // poolInfoUtils
-    getPriceToIndex: async (price: bigint) =>
-      (await getPoolInfoUtils()).read.priceToIndex([price]),
-    getIndexToPrice: async (index: bigint) =>
-      (await getPoolInfoUtils()).read.indexToPrice([index]),
+    getPriceToIndex: async (price: bigint) => (await getPoolInfoUtils()).read.priceToIndex([price]),
+    getIndexToPrice: async (index: bigint) => (await getPoolInfoUtils()).read.indexToPrice([index]),
     getHtp: async () => (await getPoolInfoUtils()).read.htp([await getPoolAddr()]),
     getLup: async () => (await getPoolInfoUtils()).read.lup([await getPoolAddr()]),
     getAuctionStatus: async (borrower: Address) =>
