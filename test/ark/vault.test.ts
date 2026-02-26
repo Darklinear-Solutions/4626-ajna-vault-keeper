@@ -12,8 +12,8 @@ import {
   drain,
   getDustThreshold,
   lpToValue,
-} from '../../src/vault/vault';
-import { getBufferTotal } from '../../src/vault/buffer';
+} from '../../src/ark/vault';
+import { getBufferTotal } from '../../src/ark/buffer';
 import { getHtp, getPriceToIndex } from '../../src/ajna/poolInfoUtils';
 import { handleTransaction, getGasWithBuffer } from '../../src/utils/transaction';
 import { client } from '../../src/utils/client.ts';

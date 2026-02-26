@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { _calculateBufferTarget, _calculateOptimalBucket } from '../src/keeper';
-import { getPrice } from '../src/oracle/price';
-import { getIndexToPrice, getPriceToIndex } from '../src/ajna/poolInfoUtils';
+import { _calculateBufferTarget, _calculateOptimalBucket } from '../../src/keepers/arkKeeper';
+import { getPrice } from '../../src/oracle/price';
+import { getIndexToPrice, getPriceToIndex } from '../../src/ajna/poolInfoUtils';
 
 describe('keeper calculations', () => {
   it('correctly calculates buffer target', async () => {

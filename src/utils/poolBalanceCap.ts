@@ -1,6 +1,6 @@
 import { client } from './client';
 import { env } from './env';
-import { getPoolAddress } from '../vault/vault';
+import { getPoolAddress } from '../ark/vault';
 import { erc20Abi, type Address } from 'viem';
 
 async function getPoolBalance() {

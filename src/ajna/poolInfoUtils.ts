@@ -1,4 +1,4 @@
-import { getPoolAddress } from '../vault/vault';
+import { getPoolAddress } from '../ark/vault';
 import { contract } from '../utils/contract';
 import type { Address } from 'viem';
 

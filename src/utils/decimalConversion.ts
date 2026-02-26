@@ -1,4 +1,4 @@
-import { getAssetDecimals } from '../vault/vault';
+import { getAssetDecimals } from '../ark/vault';
 
 export function toWad(rawValue: bigint, assetDecimals: number): bigint {
   const decimals = BigInt(assetDecimals);

@@ -1,7 +1,7 @@
 import { gql, request } from 'graphql-request';
 import { env } from '../utils/env';
 import { log } from '../utils/logger';
-import { getPoolAddress } from '../vault/vault';
+import { getPoolAddress } from '../ark/vault';
 import { getAuctionStatus } from '../ajna/poolInfoUtils';
 import type { Address } from 'viem';
 

@@ -3,7 +3,7 @@ import { client } from './client';
 import { env } from './env';
 import { getAddress, type contracts } from './address';
 import { getAbi } from './abi';
-import { haltKeeper } from '../keeper';
+import { haltKeeper } from '../keepers/arkKeeper';
 import { parseEventLogs, decodeErrorResult, type TransactionReceipt } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

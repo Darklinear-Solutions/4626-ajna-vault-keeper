@@ -10,10 +10,10 @@ export const contracts = {
     process.env.ONCHAIN_ORACLE_ADDRESS,
     process.env.MOCK_CHRONICLE_ADDRESS,
   ] as StaticTuple,
-  buffer: (async () => (await import('../vault/vault')).getBufferAddress()) as DynamicResolver,
+  buffer: (async () => (await import('../ark/vault')).getBufferAddress()) as DynamicResolver,
   poolInfoUtils: (async () =>
-    (await import('../vault/vault')).getPoolInfoUtilsAddress()) as DynamicResolver,
-  pool: (async () => (await import('../vault/vault')).getPoolAddress()) as DynamicResolver,
+    (await import('../ark/vault')).getPoolInfoUtilsAddress()) as DynamicResolver,
+  pool: (async () => (await import('../ark/vault')).getPoolAddress()) as DynamicResolver,
 } as const;
 
 export type ContractAddressKey = keyof typeof contracts;

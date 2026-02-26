@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBufferTotal } from '../../src/vault/buffer';
+import { getBufferTotal } from '../../src/ark/buffer';
 
 describe('buffer interface', () => {
   it('can query buffer total', async () => {

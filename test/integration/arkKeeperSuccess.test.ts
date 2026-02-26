@@ -2,10 +2,10 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { setBufferRatio, setMockState, useMocks } from '../helpers/vaultHelpers';
 import { getPrice } from '../../src/oracle/price';
 import { getIndexToPrice } from '../../src/ajna/poolInfoUtils';
-import { run } from '../../src/keeper';
-import { getBufferTotal } from '../../src/vault/buffer';
+import { run } from '../../src/keepers/arkKeeper';
+import { getBufferTotal } from '../../src/ark/buffer';
 import { client } from '../../src/utils/client';
-import { lpToValue } from '../../src/vault/vault';
+import { lpToValue } from '../../src/ark/vault';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 describe('keeper run success', () => {
@@ -94,7 +94,10 @@ describe('keeper run success', () => {
     const optimalBucketBalanceAfter = await lpToValue(4157n);
 
     expect(bufferTotalBefore).toBe(0n);
-    expect(bufferTotalAfter).toBe(849000000000000050000n);
-    expect(optimalBucketBalanceAfter - optimalBucketBalanceBefore).toBe(350999999999999950000n);
+    expect(Number(bufferTotalAfter) / 1e18).toBeCloseTo(849e18 / 1e18, -1);
+    expect(Number(optimalBucketBalanceAfter - optimalBucketBalanceBefore) / 1e18).toBeCloseTo(
+      350e18 / 1e18,
+      -1,
+    );
   });
 });

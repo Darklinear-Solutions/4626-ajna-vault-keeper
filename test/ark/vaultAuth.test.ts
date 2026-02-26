@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getBufferRatio, getMinBucketIndex } from '../../src/vault/vaultAuth.ts';
+import { getBufferRatio, getMinBucketIndex } from '../../src/ark/vaultAuth.ts';
 import { setBufferRatio, setMinBucketIndex } from '../helpers/vaultHelpers.ts';
 
 describe('vault auth interface', () => {

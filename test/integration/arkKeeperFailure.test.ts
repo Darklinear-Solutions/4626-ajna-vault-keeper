@@ -12,8 +12,8 @@ import {
   setMockState,
   useMocks,
 } from '../helpers/vaultHelpers';
-import { getBuckets, lpToValue } from '../../src/vault/vault';
-import { run } from '../../src/keeper';
+import { getBuckets, lpToValue } from '../../src/ark/vault';
+import { run } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
 import { env } from '../../src/utils/env';
 import { request } from 'graphql-request';
