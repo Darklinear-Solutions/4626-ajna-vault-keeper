@@ -1,8 +1,6 @@
 import { gql, request } from 'graphql-request';
 import { env } from '../utils/env';
 import { log } from '../utils/logger';
-import { getPoolAddress } from '../ark/vault';
-import { getAuctionStatus } from '../ajna/poolInfoUtils';
 import type { Address } from 'viem';
 
 type GetUnsettledAuctionsResponse = {
@@ -14,13 +12,18 @@ type LiquidationAuction = {
   kickTime: string;
 };
 
-export async function poolHasBadDebt(): Promise<boolean> {
-  const unfilteredAuctions = await _getUnsettledAuctions();
+type VaultLike = {
+  getPoolAddress: () => Promise<Address>;
+  getAuctionStatus: (borrower: Address) => Promise<readonly [bigint, bigint, bigint, ...unknown[]]>;
+};
+
+export async function poolHasBadDebt(vault: VaultLike): Promise<boolean> {
+  const unfilteredAuctions = await _getUnsettledAuctions(vault);
   if (unfilteredAuctions === 'error') return true;
   const auctionsBeforeCutoff = _filterAuctions(unfilteredAuctions as GetUnsettledAuctionsResponse);
 
   for (let i = 0; i < auctionsBeforeCutoff.length; i++) {
-    const [kickTime, collateralRemaining, debtRemaining] = await getAuctionStatus(
+    const [kickTime, collateralRemaining, debtRemaining] = await vault.getAuctionStatus(
       auctionsBeforeCutoff[i]!.borrower as Address,
     );
 
@@ -30,9 +33,11 @@ export async function poolHasBadDebt(): Promise<boolean> {
   return false;
 }
 
-export async function _getUnsettledAuctions(): Promise<GetUnsettledAuctionsResponse | string> {
+export async function _getUnsettledAuctions(
+  vault: VaultLike,
+): Promise<GetUnsettledAuctionsResponse | string> {
   try {
-    const poolAddress = (await getPoolAddress()).toLowerCase();
+    const poolAddress = (await vault.getPoolAddress()).toLowerCase();
     const subgraphUrl = env.SUBGRAPH_URL;
 
     const query = gql`
