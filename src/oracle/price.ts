@@ -11,8 +11,8 @@ const SOURCES: Record<'onchain' | 'offchain', PriceSource> = {
   offchain: getOffchainPrice,
 };
 
-export async function getPrice(): Promise<bigint> {
-  if (env.FIXED_PRICE && env.FIXED_PRICE > 0) return getFixedPrice(env.FIXED_PRICE);
+export async function getPrice(assetDecimals: number): Promise<bigint> {
+  if (env.FIXED_PRICE && env.FIXED_PRICE > 0) return getFixedPrice(env.FIXED_PRICE, assetDecimals);
 
   const errors: Error[] = [];
   const order: ('onchain' | 'offchain')[] = env.ONCHAIN_ORACLE_PRIMARY
@@ -22,7 +22,7 @@ export async function getPrice(): Promise<bigint> {
   for (const tag of order) {
     try {
       const price = await SOURCES[tag]();
-      return typeof price === 'bigint' ? price : toAsset(price);
+      return typeof price === 'bigint' ? price : toAsset(price, assetDecimals);
     } catch (err) {
       const e = new Error(`${tag} price query failed`, { cause: err });
       errors.push(e);
@@ -33,8 +33,8 @@ export async function getPrice(): Promise<bigint> {
   throw new AggregateError(errors, 'unable to fetch price from either source');
 }
 
-async function getFixedPrice(rawPrice: number): Promise<bigint> {
-  const price = await toAsset(rawPrice);
+async function getFixedPrice(rawPrice: number, assetDecimals: number): Promise<bigint> {
+  const price = toAsset(rawPrice, assetDecimals);
   log.info({ event: 'keeper_price_fixed', rawPrice, price }, `using fixed price: ${price}`);
   return price;
 }

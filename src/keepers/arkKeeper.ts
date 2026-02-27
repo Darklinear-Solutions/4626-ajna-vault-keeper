@@ -278,12 +278,13 @@ async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boo
 // ============= Data Fetching =============
 
 export async function _getKeeperData(): Promise<KeeperRunData> {
+  const assetDecimals = await vault.getAssetDecimals();
   const [initialBuckets, bufferTotal, lup, htp, price] = await Promise.all([
     vault.getBuckets(),
     vault.getBufferTotal(),
     vault.getLup(),
     vault.getHtp(),
-    getPrice(),
+    getPrice(assetDecimals),
   ]);
 
   for (let i = 0; i < initialBuckets.length; i++) {

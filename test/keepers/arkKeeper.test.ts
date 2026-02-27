@@ -16,7 +16,7 @@ describe('keeper calculations', () => {
   });
 
   it('correctly calculates optimal bucket', async () => {
-    const price = await getPrice();
+    const price = await getPrice(await vault.getAssetDecimals());
     const currentBucket = await vault.getPriceToIndex(price);
     const newBucket = await _calculateOptimalBucket(price);
     const newBucketPrice = await vault.getIndexToPrice(newBucket);

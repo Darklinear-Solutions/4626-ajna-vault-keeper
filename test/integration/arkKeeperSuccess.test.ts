@@ -46,7 +46,7 @@ describe('keeper run success', () => {
       4150n,
     ];
     const expectedUnmovedBuckets = [4160n, 4159n, 4158n, 4156n];
-    const currentPrice = await getPrice();
+    const currentPrice = await getPrice(await vault.getAssetDecimals());
 
     // Hard-coded minimum earning threshold (lower than lup in current scenario)
     const htp = 976471570782600768n;

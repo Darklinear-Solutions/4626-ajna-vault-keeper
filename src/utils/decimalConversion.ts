@@ -10,8 +10,6 @@ export function toWad(rawValue: bigint, assetDecimals: number): bigint {
   }
 }
 
-// Oracle prices are always compared against WAD-scaled Ajna bucket prices,
-// so we always scale to 18 decimals regardless of the quote token's decimals.
-export function toAsset(rawValue: number): bigint {
-  return BigInt(Math.round(rawValue * 1e18));
+export function toAsset(rawValue: number, assetDecimals: number): bigint {
+  return BigInt(rawValue * 10 ** assetDecimals);
 }
