@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { _getUnsettledAuctions, _filterAuctions } from '../../src/subgraph/poolHealth';
+import { createVault } from '../../src/ark/vault';
 
 describe('subgraph query', () => {
   it('can query subgraph for unsettled auctions', async () => {
-    const result = await _getUnsettledAuctions();
+    const result = await _getUnsettledAuctions(createVault());
 
     expect(result).toHaveProperty('liquidationAuctions');
   });

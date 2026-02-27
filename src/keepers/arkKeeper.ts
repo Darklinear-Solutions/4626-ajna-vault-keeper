@@ -1,26 +1,12 @@
-import { env } from './utils/env';
-import { log } from './utils/logger';
-import { toWad } from './utils/decimalConversion';
-import { poolBalanceCap } from './utils/poolBalanceCap';
-import { getGasWithBuffer, handleTransaction, type TransactionData } from './utils/transaction';
-import { getPrice } from './oracle/price';
-import { poolHasBadDebt } from './subgraph/poolHealth';
-import { getBufferTotal } from './vault/buffer';
-import { getHtp, getIndexToPrice, getLup, getPriceToIndex } from './ajna/poolInfoUtils';
-import { getBufferRatio, getMinBucketIndex } from './vault/vaultAuth';
-import {
-  getAssetDecimals,
-  getBuckets,
-  getTotalAssets,
-  isPaused,
-  move,
-  moveFromBuffer,
-  moveToBuffer,
-  drain,
-  getDustThreshold,
-  lpToValue,
-} from './vault/vault';
-import { getBankruptcyTime, getBucketLps, updateInterest, isBucketDebtLocked } from './ajna/pool';
+import { env } from '../utils/env';
+import { log } from '../utils/logger';
+import { toWad } from '../utils/decimalConversion';
+import { poolBalanceCap } from '../utils/poolBalanceCap';
+import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction';
+import { getPrice } from '../oracle/price';
+import { poolHasBadDebt } from '../subgraph/poolHealth';
+import { createVault } from '../ark/vault';
+import { type Address } from 'viem';
 
 type KeeperRunData = {
   buckets: readonly bigint[];
@@ -51,15 +37,19 @@ export function haltKeeper() {
   log.warn({ event: 'keeper_halted' }, 'keeper halting due to LUPBelowHTP error');
 }
 
-export async function run() {
-  if (halted) return logRunExit('keeper halted');
-  if (await isPaused()) return logRunExit('vault is currently paused');
-  if (await poolHasBadDebt()) return logRunExit('pool has bad debt');
+let vault = createVault();
 
-  const gas = await getGasWithBuffer('pool', 'updateInterest', []);
-  await handleTransaction(updateInterest(gas), { action: 'updateInterest' });
+export async function run(address?: Address, vaultAuthAddress?: Address) {
+  vault = createVault(address, vaultAuthAddress);
+
+  if (halted) return logRunExit('keeper halted');
+  if (await vault.isPaused()) return logRunExit('vault is currently paused');
+  if (await poolHasBadDebt(vault)) return logRunExit('pool has bad debt');
+
+  const gas = await getGasWithBuffer('pool', 'updateInterest', [], await vault.getPoolAddress());
+  await handleTransaction(vault.updateInterest(gas), { action: 'updateInterest' });
   const data = await _getKeeperData();
-  await handleTransaction(drain(data.optimalBucket), {
+  await handleTransaction(vault.drain(data.optimalBucket), {
     action: 'drain',
     bucket: data.optimalBucket,
   });
@@ -69,7 +59,7 @@ export async function run() {
   if (await isOptimalBucketDusty(data)) return logRunExit('optimal bucket is dusty');
   if (await isOptimalBucketRecentlyBankrupt(data))
     return logRunExit('optimal bucket was recently bankrupt');
-  if (await isBucketDebtLocked(data.optimalBucket))
+  if (await vault.isBucketDebtLocked(data.optimalBucket))
     return logRunExit('optimal bucket debt is locked due to pending auction');
 
   await rebalanceBuckets(data);
@@ -84,10 +74,10 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
 
   for (let i = 0; i < data.buckets.length; i++) {
     const bucket = data.buckets[i]!;
-    await handleTransaction(drain(bucket), { action: 'drain', bucket });
+    await handleTransaction(vault.drain(bucket), { action: 'drain', bucket });
 
-    const bucketValue = await lpToValue(bucket);
-    const amountToMove = await poolBalanceCap(bucketValue);
+    const bucketValue = await vault.lpToValue(bucket);
+    const amountToMove = await poolBalanceCap(bucketValue, vault);
     if (await shouldSkipBucket(bucket, amountToMove, data)) continue;
 
     const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data, i);
@@ -116,7 +106,7 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
     const amount = difference - env.BUFFER_PADDING;
     await moveExcessFromBuffer(amount, data.optimalBucket);
   } else {
-    const amount = await poolBalanceCap(-difference - env.BUFFER_PADDING);
+    const amount = await poolBalanceCap(-difference - env.BUFFER_PADDING, vault);
     await fillBufferDeficit(amount, data);
   }
 }
@@ -170,21 +160,21 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
   if (halted) return;
   if (op.from === 'Buffer') {
     const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [op.to, op.amount]);
-    return await handleTransaction(moveFromBuffer(op.to as bigint, op.amount, gas), {
+    return await handleTransaction(vault.moveFromBuffer(op.to as bigint, op.amount, gas), {
       action: 'moveFromBuffer',
       to: op.to,
       amount: op.amount,
     });
   } else if (op.to === 'Buffer') {
     const gas = await getGasWithBuffer('vault', 'moveToBuffer', [op.from, op.amount]);
-    return await handleTransaction(moveToBuffer(op.from, op.amount, gas), {
+    return await handleTransaction(vault.moveToBuffer(op.from, op.amount, gas), {
       action: 'moveToBuffer',
       from: op.from,
       amount: op.amount,
     });
   } else {
     const gas = await getGasWithBuffer('vault', 'move', [op.from, op.to, op.amount]);
-    return await handleTransaction(move(op.from, op.to, op.amount, gas), {
+    return await handleTransaction(vault.move(op.from, op.to, op.amount, gas), {
       action: 'move',
       from: op.from,
       to: op.to,
@@ -195,9 +185,9 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
   if (halted) return;
-  await handleTransaction(drain(targetBucket), { action: 'drain', bucket: targetBucket });
+  await handleTransaction(vault.drain(targetBucket), { action: 'drain', bucket: targetBucket });
   const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [targetBucket, amount]);
-  await handleTransaction(moveFromBuffer(targetBucket, amount, gas), {
+  await handleTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
     action: 'moveFromBuffer',
     to: targetBucket,
     amount: amount,
@@ -210,15 +200,18 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
 
   for (let i = 0; i < data.buckets.length && remaining > data.minAmount; i++) {
     const bucket = data.buckets[i]!;
-    await handleTransaction(drain(bucket), { action: 'drain', bucket });
-    const bucketValue = await lpToValue(bucket);
+    await handleTransaction(vault.drain(bucket), { action: 'drain', bucket });
+    const bucketValue = await vault.lpToValue(bucket);
 
     if (bucketValue < data.minAmount) continue;
 
-    const amountToMove = await poolBalanceCap(bucketValue >= remaining ? remaining : bucketValue);
+    const amountToMove = await poolBalanceCap(
+      bucketValue >= remaining ? remaining : bucketValue,
+      vault,
+    );
 
     const gas = await getGasWithBuffer('vault', 'moveToBuffer', [bucket, amountToMove]);
-    const txData = await handleTransaction(moveToBuffer(bucket, amountToMove, gas), {
+    const txData = await handleTransaction(vault.moveToBuffer(bucket, amountToMove, gas), {
       action: 'moveToBuffer',
       from: bucket,
       amount: amountToMove,
@@ -238,15 +231,15 @@ async function shouldSkipBucket(
   if (bucket === data.optimalBucket) return true;
   if (amountToMove < env.MIN_MOVE_AMOUNT) return true;
 
-  const bucketPrice = await getIndexToPrice(bucket);
+  const bucketPrice = await vault.getIndexToPrice(bucket);
   return await isBucketInRange(bucketPrice, data);
 }
 
 export async function isBucketInRange(bucketPrice: bigint, data: KeeperRunData): Promise<boolean> {
-  const minBucketIndex = await getMinBucketIndex();
+  const minBucketIndex = await vault.getMinBucketIndex();
   let minBucketPrice: bigint;
   if (minBucketIndex !== 0n) {
-    minBucketPrice = await getIndexToPrice(minBucketIndex);
+    minBucketPrice = await vault.getIndexToPrice(minBucketIndex);
   }
 
   const minThresholdToEarn = data.htp.price <= data.lup.price ? data.htp.price : data.lup.price;
@@ -261,18 +254,18 @@ export async function isBucketInRange(bucketPrice: bigint, data: KeeperRunData):
 }
 
 export async function isOptimalBucketInRange(data: KeeperRunData): Promise<boolean> {
-  const optimalBucketPrice = await getIndexToPrice(data.optimalBucket);
+  const optimalBucketPrice = await vault.getIndexToPrice(data.optimalBucket);
   return await isBucketInRange(optimalBucketPrice, data);
 }
 
 async function isOptimalBucketDusty(data: KeeperRunData): Promise<boolean> {
-  const bucketLps = await getBucketLps(data.optimalBucket);
-  const dustThreshold = await getDustThreshold();
+  const bucketLps = await vault.getBucketLps(data.optimalBucket);
+  const dustThreshold = await vault.getDustThreshold();
   return bucketLps !== 0n && bucketLps < dustThreshold;
 }
 
 async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boolean> {
-  const bankruptcyTimestamp = await getBankruptcyTime(data.optimalBucket);
+  const bankruptcyTimestamp = await vault.getBankruptcyTime(data.optimalBucket);
 
   if (env.MIN_TIME_SINCE_BANKRUPTCY === 0n) return bankruptcyTimestamp > 0n;
 
@@ -285,26 +278,27 @@ async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boo
 // ============= Data Fetching =============
 
 export async function _getKeeperData(): Promise<KeeperRunData> {
+  const assetDecimals = await vault.getAssetDecimals();
   const [initialBuckets, bufferTotal, lup, htp, price] = await Promise.all([
-    getBuckets(),
-    getBufferTotal(),
-    getLup(),
-    getHtp(),
-    getPrice(),
+    vault.getBuckets(),
+    vault.getBufferTotal(),
+    vault.getLup(),
+    vault.getHtp(),
+    getPrice(assetDecimals),
   ]);
 
   for (let i = 0; i < initialBuckets.length; i++) {
-    await handleTransaction(drain(initialBuckets[i]), {
+    await handleTransaction(vault.drain(initialBuckets[i]), {
       action: 'drain',
       bucket: initialBuckets[i],
     });
   }
 
   const [lupIndex, htpIndex, optimalBucket, buckets, bufferTarget] = await Promise.all([
-    getPriceToIndex(lup),
-    getPriceToIndex(htp),
+    vault.getPriceToIndex(lup),
+    vault.getPriceToIndex(htp),
     _calculateOptimalBucket(price),
-    getBuckets(),
+    vault.getBuckets(),
     _calculateBufferTarget(),
   ]);
 
@@ -323,15 +317,15 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
 }
 
 export async function _calculateOptimalBucket(price: bigint): Promise<bigint> {
-  const currentPriceIndex = await getPriceToIndex(price);
+  const currentPriceIndex = await vault.getPriceToIndex(price);
   return currentPriceIndex + env.OPTIMAL_BUCKET_DIFF;
 }
 
 export async function _calculateBufferTarget(): Promise<bigint> {
   const [bufferRatio, totalAssets, assetDecimals] = await Promise.all([
-    getBufferRatio(),
-    getTotalAssets(),
-    getAssetDecimals(),
+    vault.getBufferRatio(),
+    vault.getTotalAssets(),
+    vault.getAssetDecimals(),
   ]);
 
   return (toWad(totalAssets, assetDecimals) * bufferRatio) / 10000n;
@@ -347,7 +341,7 @@ async function _calculateBufferDeficit(data: KeeperRunData): Promise<bigint> {
 
 async function _refreshBufferValues(data: KeeperRunData) {
   [data.bufferTotal, data.bufferTarget] = await Promise.all([
-    getBufferTotal(),
+    vault.getBufferTotal(),
     _calculateBufferTarget(),
   ]);
 }
@@ -359,7 +353,7 @@ function logRunExit(reason: string) {
 }
 
 async function logFinalState(data: KeeperRunData): Promise<void> {
-  const finalBufferTotal = await getBufferTotal();
+  const finalBufferTotal = await vault.getBufferTotal();
 
   log.info(
     {

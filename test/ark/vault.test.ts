@@ -1,51 +1,44 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import {
-  getAssetDecimals,
-  getBuckets,
-  move,
-  moveToBuffer,
-  moveFromBuffer,
-  isPaused,
-  getBufferAddress,
-  getPoolInfoUtilsAddress,
-  getPoolAddress,
-  drain,
-  getDustThreshold,
-  lpToValue,
-} from '../../src/vault/vault';
-import { getBufferTotal } from '../../src/vault/buffer';
-import { getHtp, getPriceToIndex } from '../../src/ajna/poolInfoUtils';
+import { createVault } from '../../src/ark/vault';
 import { handleTransaction, getGasWithBuffer } from '../../src/utils/transaction';
 import { client } from '../../src/utils/client.ts';
 import { setBufferRatio } from '../helpers/vaultHelpers.ts';
+import type { Address } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+const vault = createVault(
+  process.env.VAULT_ADDRESS as Address,
+  process.env.VAULT_AUTH_ADDRESS as Address,
+);
+
 describe('vault interface', () => {
   it('can query buckets', async () => {
-    const buckets = await getBuckets();
-    expect(buckets).toSatisfy((val) => (val.length === 1 && val[0] === 4161n) || val.length === 0);
+    const buckets = await vault.getBuckets();
+    expect(buckets).toSatisfy(
+      (val: any) => (val.length === 1 && val[0] === 4161n) || val.length === 0,
+    );
   });
 
   it('can query asset decimals', async () => {
-    const decimals = await getAssetDecimals();
+    const decimals = await vault.getAssetDecimals();
     expect(decimals).toBe(18);
   });
 
   it('can calculate dust threshold', async () => {
-    const dustThreshold = await getDustThreshold();
+    const dustThreshold = await vault.getDustThreshold();
     expect(dustThreshold).toBe(1000001n);
   });
 
   it('can query paused status', async () => {
-    const paused = await isPaused();
+    const paused = await vault.isPaused();
     expect(paused).toBe(false);
   });
 
   it('can query contract addresses', async () => {
-    const buffer = await getBufferAddress();
-    const info = await getPoolInfoUtilsAddress();
-    const pool = await getPoolAddress();
+    const buffer = await vault.getBufferAddress();
+    const info = await vault.getPoolInfoUtilsAddress();
+    const pool = await vault.getPoolAddress();
 
     expect(buffer).toBe('0x787B797Ed807E5882d1a7bE68C4D742289df32a5');
     expect(info).toBe('0x30c5eF2997d6a882DE52c4ec01B6D0a5e5B4fAAE');
@@ -54,31 +47,31 @@ describe('vault interface', () => {
 
   it('can drain bucket', async () => {
     // Test that it doesn't revert
-    await drain(4156n);
+    await vault.drain(4156n);
   });
 });
 
 if (!process.env.CI) {
   describe('vault operations', () => {
     let snapshot: string;
-    let htp;
+    let htp: bigint;
     let htpIndex: bigint;
-    let assets;
+    let assets: bigint;
     let initialBufferBalance: bigint;
     let initialHtpQts: bigint;
 
     beforeAll(async () => {
-      htp = await getHtp();
-      htpIndex = await getPriceToIndex(htp);
+      htp = await vault.getHtp();
+      htpIndex = await vault.getPriceToIndex(htp);
       assets = BigInt(2e10);
 
       [initialBufferBalance, initialHtpQts] = await Promise.all([
-        getBufferTotal(),
-        lpToValue(htpIndex),
+        vault.getBufferTotal(),
+        vault.lpToValue(htpIndex),
       ]);
       const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [htpIndex, assets]);
 
-      await handleTransaction(moveFromBuffer(htpIndex, assets, gas), {
+      await handleTransaction(vault.moveFromBuffer(htpIndex, assets, gas), {
         action: 'MoveFromBuffer',
         to: htpIndex,
         amount: assets,
@@ -101,14 +94,14 @@ if (!process.env.CI) {
       const toIndex = htpIndex - 1n;
 
       const [beforeHtpQts, beforeToQts] = await Promise.all([
-        lpToValue(htpIndex),
-        lpToValue(toIndex),
+        vault.lpToValue(htpIndex),
+        vault.lpToValue(toIndex),
       ]);
 
       const toAssets = 19999721737n;
       const gas = await getGasWithBuffer('vault', 'move', [htpIndex, toIndex, toAssets]);
 
-      await handleTransaction(move(htpIndex, toIndex, toAssets, gas), {
+      await handleTransaction(vault.move(htpIndex, toIndex, toAssets, gas), {
         action: 'Move',
         from: htpIndex,
         to: toIndex,
@@ -116,8 +109,8 @@ if (!process.env.CI) {
       });
 
       const [afterHtpQts, afterToQts] = await Promise.all([
-        lpToValue(htpIndex),
-        lpToValue(toIndex),
+        vault.lpToValue(htpIndex),
+        vault.lpToValue(toIndex),
       ]);
 
       const htpDelta = beforeHtpQts - afterHtpQts;
@@ -132,22 +125,22 @@ if (!process.env.CI) {
       await setBufferRatio(0n);
 
       const [beforeBufferBalance, beforeHtpQts] = await Promise.all([
-        getBufferTotal(),
-        lpToValue(htpIndex),
+        vault.getBufferTotal(),
+        vault.lpToValue(htpIndex),
       ]);
 
       const toAssets = BigInt(1e10);
       const gas = await getGasWithBuffer('vault', 'moveToBuffer', [htpIndex, toAssets]);
 
-      await handleTransaction(moveToBuffer(htpIndex, toAssets, gas), {
+      await handleTransaction(vault.moveToBuffer(htpIndex, toAssets, gas), {
         action: 'MoveToBuffer',
         from: htpIndex,
         amount: toAssets,
       });
 
       const [afterBufferBalance, afterHtpQts] = await Promise.all([
-        getBufferTotal() as bigint,
-        lpToValue(htpIndex),
+        vault.getBufferTotal() as Promise<bigint>,
+        vault.lpToValue(htpIndex),
       ]);
 
       const bufferDelta: bigint = afterBufferBalance - beforeBufferBalance;
@@ -160,8 +153,8 @@ if (!process.env.CI) {
 
     it('can move from buffer to bucket', async () => {
       const [afterBufferBalance, afterHtpQts] = await Promise.all([
-        getBufferTotal(),
-        lpToValue(htpIndex),
+        vault.getBufferTotal(),
+        vault.lpToValue(htpIndex),
       ]);
 
       const htpDelta = afterHtpQts - initialHtpQts;

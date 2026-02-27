@@ -8,7 +8,7 @@ describe('getPrice', () => {
   });
 
   it('returns price from either feed', async () => {
-    const currentPrice = await getPrice();
+    const currentPrice = await getPrice(18);
     expect(currentPrice).toBe(999870478245824934n);
   });
 });
@@ -23,7 +23,7 @@ describe('get fixed price', () => {
   });
 
   it('returns properly converted fixed price', async () => {
-    const currentPrice = await getPrice();
+    const currentPrice = await getPrice(18);
     expect(currentPrice).toBe(1000000000000000000n);
   });
 });

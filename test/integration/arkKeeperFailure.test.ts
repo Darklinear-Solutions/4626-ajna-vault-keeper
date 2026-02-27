@@ -12,19 +12,25 @@ import {
   setMockState,
   useMocks,
 } from '../helpers/vaultHelpers';
-import { getBuckets, lpToValue } from '../../src/vault/vault';
-import { run } from '../../src/keeper';
+import { createVault } from '../../src/ark/vault';
+import { run } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
 import { env } from '../../src/utils/env';
 import { request } from 'graphql-request';
+import type { Address } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 describe('keeper run failure', () => {
   let snapshot: string;
+  let vault: ReturnType<typeof createVault>;
 
   beforeAll(async () => {
     snapshot = await client.request({ method: 'evm_snapshot' as any, params: [] as any });
     useMocks();
+    vault = createVault(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
   });
 
   beforeEach(async () => {
@@ -42,11 +48,14 @@ describe('keeper run failure', () => {
 
   it('skips run if optimal bucket is out of range', async () => {
     env.OPTIMAL_BUCKET_DIFF = 15n;
-    await run();
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
-    const buckets = await getBuckets();
+    const buckets = await vault.getBuckets();
     for (let i = 0; i < buckets.length - 2; i++) {
-      const balance = await lpToValue(buckets[i]);
+      const balance = await vault.lpToValue(buckets[i]!);
       expect(balance).toBe(100000000000000000000n);
     }
 
@@ -55,11 +64,14 @@ describe('keeper run failure', () => {
 
   it('skips run if optimal bucket is dusty', async () => {
     await setLps(100000n);
-    await run();
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
-    const buckets = await getBuckets();
+    const buckets = await vault.getBuckets();
     for (let i = 0; i < buckets.length - 2; i++) {
-      const balance = await lpToValue(buckets[i]);
+      const balance = await vault.lpToValue(buckets[i]!);
       expect(balance).toBe(100000000000000000000n);
     }
   });
@@ -73,11 +85,14 @@ describe('keeper run failure', () => {
     });
 
     await setAuctionStatus(borrower, kickTime, 0n, 1000000000n);
-    await run();
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
-    const buckets = await getBuckets();
+    const buckets = await vault.getBuckets();
     for (let i = 0; i < buckets.length - 2; i++) {
-      const balance = await lpToValue(buckets[i]);
+      const balance = await vault.lpToValue(buckets[i]!);
       expect(balance).toBe(100000000000000000000n);
     }
   });
@@ -86,11 +101,14 @@ describe('keeper run failure', () => {
     const bankruptcyTime = BigInt(Math.floor(Date.now() / 1000) - 86400);
     await setBankruptcyTime(bankruptcyTime);
 
-    await run();
+    await run(
+      process.env.MOCK_VAULT_ADDRESS as Address,
+      process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+    );
 
-    const buckets = await getBuckets();
+    const buckets = await vault.getBuckets();
     for (let i = 0; i < buckets.length - 2; i++) {
-      const balance = await lpToValue(buckets[i]);
+      const balance = await vault.lpToValue(buckets[i]!);
       expect(balance).toBe(100000000000000000000n);
     }
   });

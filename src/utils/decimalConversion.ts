@@ -1,5 +1,3 @@
-import { getAssetDecimals } from '../vault/vault';
-
 export function toWad(rawValue: bigint, assetDecimals: number): bigint {
   const decimals = BigInt(assetDecimals);
 
@@ -12,7 +10,6 @@ export function toWad(rawValue: bigint, assetDecimals: number): bigint {
   }
 }
 
-export async function toAsset(rawValue: number): Promise<bigint> {
-  const assetDecimals = await getAssetDecimals();
+export function toAsset(rawValue: number, assetDecimals: number): bigint {
   return BigInt(rawValue * 10 ** assetDecimals);
 }

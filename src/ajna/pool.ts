@@ -1,39 +1,32 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import type { Address } from 'viem';
 import { contract } from '../utils/contract';
 
-const pool = contract('pool');
+export function createPool(address: Address) {
+  const pool = contract('pool', address);
 
-export const getBucketInfo = (index: bigint) => pool().read.bucketInfo([index]);
-
-export const getBankruptcyTime = async (index: bigint) => {
-  const bucketInfo = await getBucketInfo(index);
-  return await bucketInfo[2];
-};
-
-export const getBucketLps = async (index: bigint) => {
-  const bucketInfo = await getBucketInfo(index);
-  return await bucketInfo[0];
-};
-
-export const updateInterest = (gas: bigint) => pool().write.updateInterest({ gas });
-
-export const getTotalT0DebtInAuction = () => pool().read.totalT0DebtInAuction();
-
-export const getInflatorInfo = () => pool().read.inflatorInfo();
-
-export const getDepositIndex = (debt: bigint) => pool().read.depositIndex(debt);
-
-export const isBucketDebtLocked = async (index: bigint): Promise<boolean> => {
-  const t0DebtInAuction = (await getTotalT0DebtInAuction()) as bigint;
-  let debtLocked = false;
-
-  if (t0DebtInAuction !== 0n) {
-    const inflatorInfo = await getInflatorInfo();
-    const wad = 10n ** 18n;
-    const debt = (t0DebtInAuction * inflatorInfo[0] + wad / 2n) / wad;
-    const indexOfSum = await getDepositIndex(debt);
-
-    if (index <= indexOfSum) debtLocked = true;
-  }
-
-  return debtLocked;
-};
+  return {
+    getBucketInfo: (index: bigint) => pool().read.bucketInfo([index]),
+    getBankruptcyTime: async (index: bigint) => {
+      const bucketInfo = await pool().read.bucketInfo([index]);
+      return (bucketInfo as any)[2];
+    },
+    getBucketLps: async (index: bigint) => {
+      const bucketInfo = await pool().read.bucketInfo([index]);
+      return (bucketInfo as any)[0];
+    },
+    updateInterest: (gas: bigint) => pool().write.updateInterest({ gas }),
+    getTotalT0DebtInAuction: () => pool().read.totalT0DebtInAuction(),
+    getInflatorInfo: () => pool().read.inflatorInfo(),
+    getDepositIndex: (debt: bigint) => pool().read.depositIndex(debt),
+    isBucketDebtLocked: async (index: bigint): Promise<boolean> => {
+      const t0DebtInAuction = (await pool().read.totalT0DebtInAuction()) as bigint;
+      if (t0DebtInAuction === 0n) return false;
+      const inflatorInfo = await pool().read.inflatorInfo();
+      const wad = 10n ** 18n;
+      const debt = (t0DebtInAuction * (inflatorInfo as any)[0] + wad / 2n) / wad;
+      const indexOfSum = (await pool().read.depositIndex(debt)) as bigint;
+      return index <= indexOfSum;
+    },
+  };
+}
