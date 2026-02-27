@@ -1,15 +1,6 @@
 import 'dotenv/config';
 
-const REQUIRED = [
-  'RPC_URL',
-  'QUOTE_TOKEN_ADDRESS',
-  'PRIVATE_KEY',
-  'VAULT_ADDRESS',
-  'VAULT_AUTH_ADDRESS',
-  'OPTIMAL_BUCKET_DIFF',
-  'KEEPER_INTERVAL_MS',
-  'SUBGRAPH_URL',
-] as const;
+const REQUIRED = ['RPC_URL', 'PRIVATE_KEY', 'SUBGRAPH_URL'] as const;
 
 for (const key of REQUIRED) {
   if (!process.env[key]) {
