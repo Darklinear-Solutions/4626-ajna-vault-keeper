@@ -10,6 +10,7 @@ import { vaultAuthAbi } from '../abi/VaultAuth';
 import { mockVaultAuthAbi } from '../../test/mocks/abi/MockVaultAuth.ts';
 import { poolAbi } from '../abi/Pool.ts';
 import { mockPoolAbi } from '../../test/mocks/abi/MockPool.ts';
+import { eulerEarnAbi } from '../abi/EulerEarn.ts';
 import type { Abi } from 'viem';
 
 type Variant = { real: Abi; mock?: Abi };
@@ -22,6 +23,7 @@ export const abis = {
   buffer: { real: bufferAbi, mock: mockBufferAbi },
   poolInfoUtils: { real: poolInfoUtilsAbi, mock: mockPoolInfoUtilsAbi },
   pool: { real: poolAbi, mock: mockPoolAbi },
+  metavault: { real: eulerEarnAbi, mock: eulerEarnAbi },
 } as const satisfies Record<string, AbiEntry>;
 
 export type ContractAbiKey = keyof typeof abis;
