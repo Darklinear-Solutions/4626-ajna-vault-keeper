@@ -91,12 +91,10 @@ describe('reallocate', () => {
     const ark2Address = process.env.ARK_2_ADDRESS as Address;
     const ark3Address = process.env.ARK_3_ADDRESS as Address;
 
-    const bufferBalanceBefore = await getExpectedSupplyAssets(bufferAddress);
-
     const allocations: MarketAllocation[] = [
       {
         id: bufferAddress,
-        assets: bufferBalanceBefore - toWad(100n, 0),
+        assets: toWad(400n, 0),
       },
       {
         id: ark1Address,
@@ -108,7 +106,7 @@ describe('reallocate', () => {
       },
       {
         id: ark3Address,
-        assets: toWad(20n, 0),
+        assets: maxUint256,
       },
     ];
 
@@ -118,14 +116,14 @@ describe('reallocate', () => {
       allocations,
     });
 
-    const bufferBalanceAfter = await getExpectedSupplyAssets(bufferAddress);
+    const bufferBalance = await getExpectedSupplyAssets(bufferAddress);
     const ark1Balance = await getExpectedSupplyAssets(ark1Address);
     const ark2Balance = await getExpectedSupplyAssets(ark2Address);
     const ark3Balance = await getExpectedSupplyAssets(ark3Address);
 
-    expect((Number(bufferBalanceAfter) - 400e18) / 1e18).toBeCloseTo(0);
+    expect(bufferBalance).toBe(400000000000000000000n);
     expect(ark1Balance).toBe(45000000000000000000n);
     expect(ark2Balance).toBe(35000000000000000000n);
-    expect(ark3Balance).toBe(20000000000000000000n);
+    expect(Number(ark3Balance) / 1e18).toBeCloseTo(20);
   });
 });

@@ -121,7 +121,6 @@ export async function handleTransaction(
       }
     }
 
-    console.log(err);
     log.error(
       {
         event: 'tx_failed',
