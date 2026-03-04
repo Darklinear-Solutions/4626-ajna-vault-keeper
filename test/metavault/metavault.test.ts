@@ -11,6 +11,7 @@ import {
 import { type Address, maxUint256 } from 'viem';
 import { client } from '../../src/utils/client';
 import { toWad } from '../../src/utils/decimalConversion';
+import { getGasWithBuffer, handleTransaction } from '../../src/utils/transaction';
 
 describe('metavault interface', () => {
   it('can read expectedSupplyAssets', async () => {
@@ -71,7 +72,11 @@ describe('reallocate', () => {
       },
     ];
 
-    await reallocate(allocations);
+    const gas = await getGasWithBuffer('metavault', 'reallocate', [allocations]);
+    await handleTransaction(reallocate(allocations, gas), {
+      action: 'reallocate',
+      allocations,
+    });
 
     const arkBalance = await getExpectedSupplyAssets(arkAddress);
     const bufferBalance = await getExpectedSupplyAssets(bufferAddress);
@@ -107,7 +112,11 @@ describe('reallocate', () => {
       },
     ];
 
-    await reallocate(allocations);
+    const gas = await getGasWithBuffer('metavault', 'reallocate', [allocations]);
+    await handleTransaction(reallocate(allocations, gas), {
+      action: 'reallocate',
+      allocations,
+    });
 
     const bufferBalanceAfter = await getExpectedSupplyAssets(bufferAddress);
     const ark1Balance = await getExpectedSupplyAssets(ark1Address);

@@ -32,5 +32,5 @@ export const getSupplyCap = async (id: Address) => {
   return config.cap;
 };
 
-export const reallocate = (allocations: MarketAllocation[]) =>
-  metavault().write.reallocate([allocations]);
+export const reallocate = (allocations: MarketAllocation[], gas: bigint) =>
+  metavault().write.reallocate([allocations], { gas });

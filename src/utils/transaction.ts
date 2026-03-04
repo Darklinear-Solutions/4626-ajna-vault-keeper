@@ -72,23 +72,34 @@ export async function handleTransaction(
     const receipt = await wait(hash);
     status = true;
 
-    if (context) {
+    if (context && context?.action !== 'reallocate') {
       const action = context.action as string;
       const amount = getAmountMoved(receipt, action);
       assets = amount ?? (context.amount as bigint);
     }
 
-    log.info(
-      {
-        event: 'tx_success',
-        action: context?.action,
-        hash,
-        block: receipt.blockNumber,
-        assetsMoved: assets,
-        ...context,
-      },
-      `transaction confirmed`,
-    );
+    if (assets === 0n) {
+      log.info(
+        {
+          event: 'tx_success',
+          hash,
+          block: receipt.blockNumber,
+          ...context,
+        },
+        `transaction confirmed`,
+      );
+    } else {
+      log.info(
+        {
+          event: 'tx_success',
+          hash,
+          block: receipt.blockNumber,
+          assetsMoved: assets,
+          ...context,
+        },
+        `transaction confirmed`,
+      );
+    }
   } catch (err) {
     const receipt = (err as any)?.receipt as TransactionReceipt | undefined;
     const phase = receipt ? 'revert' : hash ? 'fail' : 'send';
