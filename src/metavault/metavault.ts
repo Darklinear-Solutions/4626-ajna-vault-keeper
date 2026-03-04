@@ -1,9 +1,18 @@
 import { contract } from '../utils/contract';
 import { type Address } from 'viem';
 
+export type MarketAllocation = {
+  id: Address;
+  assets: bigint;
+};
+
 const metavault = contract('metavault');
 
-export const getExpectedSupplyAssets = (id: Address) => metavault().read.expectedSupplyAssets(id);
+export const getExpectedSupplyAssets = async (id: Address) => {
+  const config = await getConfig(id);
+  if (config.balance === 0n) return 0n;
+  return metavault().read.expectedSupplyAssets(id);
+};
 
 export const getTotalExpectedSupplyAssets = async (ids: Address[]) => {
   let totalAssets = 0n;
@@ -22,3 +31,6 @@ export const getSupplyCap = async (id: Address) => {
   const config = await getConfig(id);
   return config.cap;
 };
+
+export const reallocate = (allocations: MarketAllocation[]) =>
+  metavault().write.reallocate([allocations]);
