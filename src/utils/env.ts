@@ -25,7 +25,7 @@ const gasBuffer =
     ? 50n
     : BigInt(process.env.GAS_BUFFER);
 
-const defaultGas = process.env.DEFAULT_GAS ?? 1500000;
+const defaultGas = process.env.DEFAULT_GAS ?? 3000000;
 
 const bufferPadding = process.env.BUFFER_PADDING ?? 100000000000000;
 
