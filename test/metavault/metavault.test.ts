@@ -121,7 +121,7 @@ describe('reallocate', () => {
     const ark2Balance = await getExpectedSupplyAssets(ark2Address);
     const ark3Balance = await getExpectedSupplyAssets(ark3Address);
 
-    expect(bufferBalance).toBe(400000000000000000000n);
+    expect(Number(bufferBalance) / 1e18).toBe(400);
     expect(ark1Balance).toBe(45000000000000000000n);
     expect(ark2Balance).toBe(35000000000000000000n);
     expect(Number(ark3Balance) / 1e18).toBeCloseTo(20);

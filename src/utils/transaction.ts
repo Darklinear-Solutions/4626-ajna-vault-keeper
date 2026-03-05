@@ -33,7 +33,7 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
         data: tx.input,
       });
     } catch (err: any) {
-      const data = err.data;
+      const data = err?.cause?.cause?.data ?? err?.cause?.data ?? err?.data;
 
       if (isLupBelowHtp(err)) {
         if (env.HALT_KEEPER_IF_LUP_BELOW_HTP) haltKeeper();
@@ -45,9 +45,13 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
       } else if (data) {
         let decoded;
         try {
-          decoded = decodeErrorResult({ abi: getAbi('vault'), data });
+          decoded = decodeErrorResult({ abi: getAbi('metavault'), data });
         } catch {
-          decoded = { errorName: 'UnknownRevert', sig: data.slice(0, 10), data };
+          try {
+            decoded = decodeErrorResult({ abi: getAbi('vault'), data });
+          } catch {
+            decoded = { errorName: 'UnknownRevert', sig: data.slice(0, 10), data };
+          }
         }
         throw Object.assign(new Error(String(decoded.errorName)), { receipt, decoded, cause: err });
       }
@@ -170,7 +174,7 @@ function abridgedViemError(err: unknown) {
     functionName: e?.functionName,
     args: e?.args,
     sender: e?.sender,
-    data: e?.data ?? e?.decoded?.data,
+    data: e?.cause?.cause?.data ?? e?.cause?.data ?? e?.data ?? e?.decoded?.data,
     stack: e?.stack,
   };
 }
