@@ -97,6 +97,7 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
 
 async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
   await _refreshBufferValues(data);
+  if (data.bufferTarget === 0n) return;
 
   const difference = data.bufferTotal - data.bufferTarget;
   const abs = difference >= 0n ? difference : -difference;
@@ -123,7 +124,7 @@ function planBucketOperations(
 ): MoveOperation[] {
   const operations: MoveOperation[] = [];
 
-  if (bufferNeeded < data.minAmount) {
+  if (bufferNeeded <= data.minAmount) {
     operations.push({
       from: bucket,
       to: data.optimalBucket,
@@ -229,6 +230,7 @@ async function shouldSkipBucket(
   amountToMove: bigint,
   data: KeeperRunData,
 ): Promise<boolean> {
+  if (amountToMove <= 0n) return true;
   if (bucket === data.optimalBucket) return true;
   if (amountToMove < env.MIN_MOVE_AMOUNT) return true;
 
