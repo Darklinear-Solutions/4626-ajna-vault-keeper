@@ -51,118 +51,116 @@ describe('vault interface', () => {
   });
 });
 
-if (!process.env.CI) {
-  describe('vault operations', () => {
-    let snapshot: string;
-    let htp: bigint;
-    let htpIndex: bigint;
-    let assets: bigint;
-    let initialBufferBalance: bigint;
-    let initialHtpQts: bigint;
+describe('vault operations', () => {
+  let snapshot: string;
+  let htp: bigint;
+  let htpIndex: bigint;
+  let assets: bigint;
+  let initialBufferBalance: bigint;
+  let initialHtpQts: bigint;
 
-    beforeAll(async () => {
-      htp = await vault.getHtp();
-      htpIndex = await vault.getPriceToIndex(htp);
-      assets = BigInt(2e10);
+  beforeAll(async () => {
+    htp = await vault.getHtp();
+    htpIndex = await vault.getPriceToIndex(htp);
+    assets = BigInt(2e10);
 
-      [initialBufferBalance, initialHtpQts] = await Promise.all([
-        vault.getBufferTotal(),
-        vault.lpToValue(htpIndex),
-      ]);
-      const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [htpIndex, assets]);
+    [initialBufferBalance, initialHtpQts] = await Promise.all([
+      vault.getBufferTotal(),
+      vault.lpToValue(htpIndex),
+    ]);
+    const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [htpIndex, assets]);
 
-      await handleTransaction(vault.moveFromBuffer(htpIndex, assets, gas), {
-        action: 'moveFromBuffer',
-        to: htpIndex,
-        amount: assets,
-      });
-
-      snapshot = await client.request({ method: 'evm_snapshot' as any, params: [] as any });
-      await setBufferRatio(0n);
+    await handleTransaction(vault.moveFromBuffer(htpIndex, assets, gas), {
+      action: 'moveFromBuffer',
+      to: htpIndex,
+      amount: assets,
     });
 
-    beforeEach(async () => {
-      await client.request({ method: 'evm_revert' as any, params: [snapshot] as any });
-      snapshot = await client.request({ method: 'evm_snapshot' as any, params: [] as any });
-    });
-
-    afterAll(async () => {
-      await setBufferRatio(5000n);
-    });
-
-    it('can move between buckets', async () => {
-      const toIndex = htpIndex - 1n;
-
-      const [beforeHtpQts, beforeToQts] = await Promise.all([
-        vault.lpToValue(htpIndex),
-        vault.lpToValue(toIndex),
-      ]);
-
-      const toAssets = 19999721737n;
-      const gas = await getGasWithBuffer('vault', 'move', [htpIndex, toIndex, toAssets]);
-
-      await handleTransaction(vault.move(htpIndex, toIndex, toAssets, gas), {
-        action: 'move',
-        from: htpIndex,
-        to: toIndex,
-        amount: toAssets,
-      });
-
-      const [afterHtpQts, afterToQts] = await Promise.all([
-        vault.lpToValue(htpIndex),
-        vault.lpToValue(toIndex),
-      ]);
-
-      const htpDelta = beforeHtpQts - afterHtpQts;
-      const toDelta = afterToQts - beforeToQts;
-      const deltaDiff = toDelta - htpDelta;
-
-      expect(deltaDiff).toBeLessThan(2n);
-      expect(toDelta).toBeGreaterThan(0n);
-    });
-
-    it('can move from bucket to buffer', async () => {
-      await setBufferRatio(0n);
-
-      const [beforeBufferBalance, beforeHtpQts] = await Promise.all([
-        vault.getBufferTotal(),
-        vault.lpToValue(htpIndex),
-      ]);
-
-      const toAssets = BigInt(1e10);
-      const gas = await getGasWithBuffer('vault', 'moveToBuffer', [htpIndex, toAssets]);
-
-      await handleTransaction(vault.moveToBuffer(htpIndex, toAssets, gas), {
-        action: 'moveToBuffer',
-        from: htpIndex,
-        amount: toAssets,
-      });
-
-      const [afterBufferBalance, afterHtpQts] = await Promise.all([
-        vault.getBufferTotal() as Promise<bigint>,
-        vault.lpToValue(htpIndex),
-      ]);
-
-      const bufferDelta: bigint = afterBufferBalance - beforeBufferBalance;
-      const htpDelta = beforeHtpQts - afterHtpQts;
-      const deltaDiff = htpDelta - bufferDelta;
-
-      expect(deltaDiff).toBeLessThan(3n);
-      expect(bufferDelta).toBeGreaterThan(0n);
-    });
-
-    it('can move from buffer to bucket', async () => {
-      const [afterBufferBalance, afterHtpQts] = await Promise.all([
-        vault.getBufferTotal(),
-        vault.lpToValue(htpIndex),
-      ]);
-
-      const htpDelta = afterHtpQts - initialHtpQts;
-      const bufferDelta = initialBufferBalance - afterBufferBalance;
-      const deltaDiff = bufferDelta - htpDelta;
-
-      expect(deltaDiff).toBeLessThan(300000);
-      expect(htpDelta).toBeGreaterThan(0n);
-    });
+    snapshot = await client.request({ method: 'evm_snapshot' as any, params: [] as any });
+    await setBufferRatio(0n);
   });
-}
+
+  beforeEach(async () => {
+    await client.request({ method: 'evm_revert' as any, params: [snapshot] as any });
+    snapshot = await client.request({ method: 'evm_snapshot' as any, params: [] as any });
+  });
+
+  afterAll(async () => {
+    await setBufferRatio(5000n);
+  });
+
+  it('can move between buckets', async () => {
+    const toIndex = htpIndex - 1n;
+
+    const [beforeHtpQts, beforeToQts] = await Promise.all([
+      vault.lpToValue(htpIndex),
+      vault.lpToValue(toIndex),
+    ]);
+
+    const toAssets = 19999721737n;
+    const gas = await getGasWithBuffer('vault', 'move', [htpIndex, toIndex, toAssets]);
+
+    await handleTransaction(vault.move(htpIndex, toIndex, toAssets, gas), {
+      action: 'move',
+      from: htpIndex,
+      to: toIndex,
+      amount: toAssets,
+    });
+
+    const [afterHtpQts, afterToQts] = await Promise.all([
+      vault.lpToValue(htpIndex),
+      vault.lpToValue(toIndex),
+    ]);
+
+    const htpDelta = beforeHtpQts - afterHtpQts;
+    const toDelta = afterToQts - beforeToQts;
+    const deltaDiff = toDelta - htpDelta;
+
+    expect(deltaDiff).toBeLessThan(2n);
+    expect(toDelta).toBeGreaterThan(0n);
+  });
+
+  it('can move from bucket to buffer', async () => {
+    await setBufferRatio(0n);
+
+    const [beforeBufferBalance, beforeHtpQts] = await Promise.all([
+      vault.getBufferTotal(),
+      vault.lpToValue(htpIndex),
+    ]);
+
+    const toAssets = BigInt(1e10);
+    const gas = await getGasWithBuffer('vault', 'moveToBuffer', [htpIndex, toAssets]);
+
+    await handleTransaction(vault.moveToBuffer(htpIndex, toAssets, gas), {
+      action: 'moveToBuffer',
+      from: htpIndex,
+      amount: toAssets,
+    });
+
+    const [afterBufferBalance, afterHtpQts] = await Promise.all([
+      vault.getBufferTotal() as Promise<bigint>,
+      vault.lpToValue(htpIndex),
+    ]);
+
+    const bufferDelta: bigint = afterBufferBalance - beforeBufferBalance;
+    const htpDelta = beforeHtpQts - afterHtpQts;
+    const deltaDiff = htpDelta - bufferDelta;
+
+    expect(deltaDiff).toBeLessThan(3n);
+    expect(bufferDelta).toBeGreaterThan(0n);
+  });
+
+  it('can move from buffer to bucket', async () => {
+    const [afterBufferBalance, afterHtpQts] = await Promise.all([
+      vault.getBufferTotal(),
+      vault.lpToValue(htpIndex),
+    ]);
+
+    const htpDelta = afterHtpQts - initialHtpQts;
+    const bufferDelta = initialBufferBalance - afterBufferBalance;
+    const deltaDiff = bufferDelta - htpDelta;
+
+    expect(deltaDiff).toBeLessThan(300000);
+    expect(htpDelta).toBeGreaterThan(0n);
+  });
+});
