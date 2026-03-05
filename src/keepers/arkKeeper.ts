@@ -61,6 +61,7 @@ export async function run(address?: Address, vaultAuthAddress?: Address) {
     return logRunExit('optimal bucket was recently bankrupt');
   if (await vault.isBucketDebtLocked(data.optimalBucket))
     return logRunExit('optimal bucket debt is locked due to pending auction');
+  if (await optimalBucketHasCollateral(data)) return logRunExit('optimal bucket has collateral');
 
   await rebalanceBuckets(data);
   await rebalanceBuffer(data);
@@ -273,6 +274,13 @@ async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boo
     bankruptcyTimestamp > 0n &&
     BigInt(Math.floor(Date.now() / 1000)) - bankruptcyTimestamp < env.MIN_TIME_SINCE_BANKRUPTCY
   );
+}
+
+async function optimalBucketHasCollateral(data: KeeperRunData): Promise<boolean> {
+  const bucketInfo = await vault.getBucketInfo(data.optimalBucket);
+  const collateral = bucketInfo[2];
+
+  return collateral > 0n;
 }
 
 // ============= Data Fetching =============
