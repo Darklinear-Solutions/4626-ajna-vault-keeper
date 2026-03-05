@@ -1,15 +1,6 @@
 import 'dotenv/config';
 
-const REQUIRED = [
-  'RPC_URL',
-  'QUOTE_TOKEN_ADDRESS',
-  'PRIVATE_KEY',
-  'VAULT_ADDRESS',
-  'VAULT_AUTH_ADDRESS',
-  'OPTIMAL_BUCKET_DIFF',
-  'KEEPER_INTERVAL_MS',
-  'SUBGRAPH_URL',
-] as const;
+const REQUIRED = ['RPC_URL', 'PRIVATE_KEY', 'SUBGRAPH_URL'] as const;
 
 for (const key of REQUIRED) {
   if (!process.env[key]) {
@@ -34,7 +25,7 @@ const gasBuffer =
     ? 50n
     : BigInt(process.env.GAS_BUFFER);
 
-const defaultGas = process.env.DEFAULT_GAS ?? 1500000;
+const defaultGas = process.env.DEFAULT_GAS ?? 3000000;
 
 const bufferPadding = process.env.BUFFER_PADDING ?? 100000000000000;
 

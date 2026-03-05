@@ -61,6 +61,7 @@ export async function run(address?: Address, vaultAuthAddress?: Address) {
     return logRunExit('optimal bucket was recently bankrupt');
   if (await vault.isBucketDebtLocked(data.optimalBucket))
     return logRunExit('optimal bucket debt is locked due to pending auction');
+  if (await optimalBucketHasCollateral(data)) return logRunExit('optimal bucket has collateral');
 
   await rebalanceBuckets(data);
   await rebalanceBuffer(data);
@@ -96,6 +97,7 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
 
 async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
   await _refreshBufferValues(data);
+  if (data.bufferTarget === 0n) return;
 
   const difference = data.bufferTotal - data.bufferTarget;
   const abs = difference >= 0n ? difference : -difference;
@@ -122,7 +124,7 @@ function planBucketOperations(
 ): MoveOperation[] {
   const operations: MoveOperation[] = [];
 
-  if (bufferNeeded < data.minAmount) {
+  if (bufferNeeded <= data.minAmount) {
     operations.push({
       from: bucket,
       to: data.optimalBucket,
@@ -228,6 +230,7 @@ async function shouldSkipBucket(
   amountToMove: bigint,
   data: KeeperRunData,
 ): Promise<boolean> {
+  if (amountToMove <= 0n) return true;
   if (bucket === data.optimalBucket) return true;
   if (amountToMove < env.MIN_MOVE_AMOUNT) return true;
 
@@ -273,6 +276,13 @@ async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boo
     bankruptcyTimestamp > 0n &&
     BigInt(Math.floor(Date.now() / 1000)) - bankruptcyTimestamp < env.MIN_TIME_SINCE_BANKRUPTCY
   );
+}
+
+async function optimalBucketHasCollateral(data: KeeperRunData): Promise<boolean> {
+  const bucketInfo = await vault.getBucketInfo(data.optimalBucket);
+  const collateral = bucketInfo[2];
+
+  return collateral > 0n;
 }
 
 // ============= Data Fetching =============

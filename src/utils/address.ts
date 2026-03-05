@@ -9,6 +9,7 @@ export const contracts = {
     process.env.ONCHAIN_ORACLE_ADDRESS,
     process.env.MOCK_CHRONICLE_ADDRESS,
   ] as StaticTuple,
+  metavault: [process.env.METAVAULT_ADDRESS, process.env.METAVAULT_ADDRESS] as StaticTuple,
 } as const;
 
 export type ContractAddressKey = keyof typeof contracts;

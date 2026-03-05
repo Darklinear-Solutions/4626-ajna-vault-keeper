@@ -72,7 +72,7 @@ if (!process.env.CI) {
       const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [htpIndex, assets]);
 
       await handleTransaction(vault.moveFromBuffer(htpIndex, assets, gas), {
-        action: 'MoveFromBuffer',
+        action: 'moveFromBuffer',
         to: htpIndex,
         amount: assets,
       });
@@ -102,7 +102,7 @@ if (!process.env.CI) {
       const gas = await getGasWithBuffer('vault', 'move', [htpIndex, toIndex, toAssets]);
 
       await handleTransaction(vault.move(htpIndex, toIndex, toAssets, gas), {
-        action: 'Move',
+        action: 'move',
         from: htpIndex,
         to: toIndex,
         amount: toAssets,
@@ -133,7 +133,7 @@ if (!process.env.CI) {
       const gas = await getGasWithBuffer('vault', 'moveToBuffer', [htpIndex, toAssets]);
 
       await handleTransaction(vault.moveToBuffer(htpIndex, toAssets, gas), {
-        action: 'MoveToBuffer',
+        action: 'moveToBuffer',
         from: htpIndex,
         amount: toAssets,
       });

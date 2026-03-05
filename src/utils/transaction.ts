@@ -33,7 +33,7 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
         data: tx.input,
       });
     } catch (err: any) {
-      const data = err.data;
+      const data = err?.cause?.cause?.data ?? err?.cause?.data ?? err?.data;
 
       if (isLupBelowHtp(err)) {
         if (env.HALT_KEEPER_IF_LUP_BELOW_HTP) haltKeeper();
@@ -45,9 +45,13 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
       } else if (data) {
         let decoded;
         try {
-          decoded = decodeErrorResult({ abi: getAbi('vault'), data });
+          decoded = decodeErrorResult({ abi: getAbi('metavault'), data });
         } catch {
-          decoded = { errorName: 'UnknownRevert', sig: data.slice(0, 10), data };
+          try {
+            decoded = decodeErrorResult({ abi: getAbi('vault'), data });
+          } catch {
+            decoded = { errorName: 'UnknownRevert', sig: data.slice(0, 10), data };
+          }
         }
         throw Object.assign(new Error(String(decoded.errorName)), { receipt, decoded, cause: err });
       }
@@ -72,23 +76,34 @@ export async function handleTransaction(
     const receipt = await wait(hash);
     status = true;
 
-    if (context) {
+    if (context && context?.action !== 'reallocate') {
       const action = context.action as string;
       const amount = getAmountMoved(receipt, action);
       assets = amount ?? (context.amount as bigint);
     }
 
-    log.info(
-      {
-        event: 'tx_success',
-        action: context?.action,
-        hash,
-        block: receipt.blockNumber,
-        assetsMoved: assets,
-        ...context,
-      },
-      `transaction confirmed`,
-    );
+    if (assets === 0n) {
+      log.info(
+        {
+          event: 'tx_success',
+          hash,
+          block: receipt.blockNumber,
+          ...context,
+        },
+        `transaction confirmed`,
+      );
+    } else {
+      log.info(
+        {
+          event: 'tx_success',
+          hash,
+          block: receipt.blockNumber,
+          assetsMoved: assets,
+          ...context,
+        },
+        `transaction confirmed`,
+      );
+    }
   } catch (err) {
     const receipt = (err as any)?.receipt as TransactionReceipt | undefined;
     const phase = receipt ? 'revert' : hash ? 'fail' : 'send';
@@ -159,7 +174,7 @@ function abridgedViemError(err: unknown) {
     functionName: e?.functionName,
     args: e?.args,
     sender: e?.sender,
-    data: e?.data ?? e?.decoded?.data,
+    data: e?.cause?.cause?.data ?? e?.cause?.data ?? e?.data ?? e?.decoded?.data,
     stack: e?.stack,
   };
 }
