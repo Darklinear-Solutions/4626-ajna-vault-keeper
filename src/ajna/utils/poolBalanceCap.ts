@@ -1,5 +1,5 @@
-import { client } from './client';
-import { env } from './env';
+import { client } from '../../utils/client';
+import { env } from '../../utils/env';
 import { erc20Abi, type Address } from 'viem';
 
 type VaultLike = { getPoolAddress: () => Promise<Address> };

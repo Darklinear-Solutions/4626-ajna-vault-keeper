@@ -1,7 +1,7 @@
 import { env } from '../utils/env';
 import { log } from '../utils/logger';
 import { toWad } from '../utils/decimalConversion';
-import { poolBalanceCap } from '../utils/poolBalanceCap';
+import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
 import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction';
 import { getPrice } from '../oracle/price';
 import { poolHasBadDebt } from '../subgraph/poolHealth';
