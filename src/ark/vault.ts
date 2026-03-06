@@ -77,6 +77,8 @@ export function createVault(address?: Address, vaultAuthAddress?: Address) {
     getLup: async () => (await getPoolInfoUtils()).read.lup([await getPoolAddr()]),
     getAuctionStatus: async (borrower: Address) =>
       (await getPoolInfoUtils()).read.auctionStatus(await getPoolAddr(), borrower),
+    getBorrowFeeRate: async () =>
+      (await getPoolInfoUtils()).read.borrowFeeRate(await getPoolAddr()),
 
     // pool
     getBucketInfo: async (index: bigint) => (await getPool()).read.bucketInfo([index]),

@@ -11,5 +11,6 @@ export function createPoolInfoUtils(address: Address, poolAddress: Address) {
     getLup: () => poolInfoUtils().read.lup([poolAddress]),
     getAuctionStatus: (borrower: Address) =>
       poolInfoUtils().read.auctionStatus(poolAddress, borrower),
+    getBorrowFeeRate: (poolAddress: Address) => poolInfoUtils().read.borrowFeeRate(poolAddress),
   };
 }

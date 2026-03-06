@@ -38,4 +38,9 @@ describe('PoolInfoUtils interface', () => {
     const auction = await vault.getAuctionStatus('0x40ec5B33f54e0E8A33A975908C5BA1c14e5BbbDf');
     expect((auction as any[]).length).toBe(9);
   });
+
+  it('can query borrow fee rate', async () => {
+    const rate = await vault.getBorrowFeeRate();
+    expect(rate).toBe(500000000000000n);
+  });
 });

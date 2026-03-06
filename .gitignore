@@ -11,3 +11,4 @@ cache/
 out/
 .codeql-db
 codeql-results.sarif
+config.json

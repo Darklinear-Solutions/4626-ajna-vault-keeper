@@ -115,6 +115,18 @@ async function deployContracts(): Promise<void> {
       process.env.ARK_AUTH_1_ADDRESS = addresses.ARK_AUTH_1_ADDRESS;
       process.env.ARK_AUTH_2_ADDRESS = addresses.ARK_AUTH_2_ADDRESS;
       process.env.ARK_AUTH_3_ADDRESS = addresses.ARK_AUTH_3_ADDRESS;
+
+      const testConfig = JSON.parse(
+        fs.readFileSync(path.join(process.cwd(), 'config.test.json'), 'utf-8'),
+      );
+      testConfig.arks[0].address = addresses.ARK_1_ADDRESS;
+      testConfig.arks[1].address = addresses.ARK_2_ADDRESS;
+      testConfig.arks[2].address = addresses.ARK_3_ADDRESS;
+      testConfig.buffer.address = addresses.AAVE_VAULT_ADDRESS;
+      fs.writeFileSync(
+        path.join(process.cwd(), 'config.json'),
+        JSON.stringify(testConfig, null, 2),
+      );
     }
   } else {
     throw new Error('Deployment addresses file not found');
