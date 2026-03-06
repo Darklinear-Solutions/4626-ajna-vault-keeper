@@ -1,0 +1,16 @@
+{
+  "arks": [
+    {
+      "address": "",
+      "allocation": {
+        "min": 0,
+        "max": 0
+      }
+    }
+  ],
+  "buffer": {
+    "address": "",
+    "allocation": 0
+  },
+  "minRateDiff": 10
+}
