@@ -3,7 +3,7 @@ import { createVault } from '../ark/vault';
 import { evaluateRates, type ArkEvaluation } from '../metavault/utils/evaluateRates';
 import {
   getExpectedSupplyAssets,
-  getTotalAssets,
+  getTotalExpectedSupplyAssets,
   reallocate,
   type MarketAllocation,
 } from '../metavault/metavault';
@@ -42,7 +42,8 @@ export type BufferAllocation = {
 // ============= Main Run Function =============
 
 export async function run() {
-  const totalAssets = (await getTotalAssets()) as bigint;
+  const strategyAddresses = [config.buffer.address, ...config.arks.map((ark) => ark.address)];
+  const totalAssets = (await getTotalExpectedSupplyAssets(strategyAddresses)) as bigint;
   const arkAllocations = await _buildArkAllocations();
   const bufferAllocation = await _buildBufferAllocation();
 

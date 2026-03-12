@@ -1,4 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+vi.mock('../../src/utils/config', () => ({
+  config: { minRateDiff: 10 },
+}));
+
 import {
   _rebalanceBuffer,
   _reallocateForRates,

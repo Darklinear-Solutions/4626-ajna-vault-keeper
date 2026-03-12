@@ -8,8 +8,6 @@ export type MarketAllocation = {
 
 const metavault = contract('metavault');
 
-export const getTotalAssets = async (): Promise<bigint> => metavault().read.totalAssets();
-
 export const getExpectedSupplyAssets = async (id: Address) => {
   const config = await getConfig(id);
   if (config.balance === 0n) return 0n;
