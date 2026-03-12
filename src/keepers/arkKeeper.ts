@@ -8,6 +8,11 @@ import { poolHasBadDebt } from '../subgraph/poolHealth';
 import { createVault } from '../ark/vault';
 import { type Address } from 'viem';
 
+let halted = false;
+let vault = createVault();
+
+// ============= Types =============
+
 type KeeperRunData = {
   buckets: readonly bigint[];
   bufferTotal: bigint;
@@ -31,13 +36,7 @@ type MoveOperation = {
   bucketIndex?: number;
 };
 
-let halted = false;
-export function haltKeeper() {
-  halted = true;
-  log.warn({ event: 'keeper_halted' }, 'keeper halting due to LUPBelowHTP error');
-}
-
-let vault = createVault();
+// ============= Main Run Function =============
 
 export async function run(address?: Address, vaultAuthAddress?: Address) {
   vault = createVault(address, vaultAuthAddress);
@@ -223,7 +222,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
   }
 }
 
-// ============= Validation Functions =============
+// ============= Validation =============
 
 async function shouldSkipBucket(
   bucket: bigint,
@@ -354,6 +353,13 @@ async function _refreshBufferValues(data: KeeperRunData) {
     vault.getBufferTotal(),
     _calculateBufferTarget(),
   ]);
+}
+
+// ============= Helpers =============
+
+export function haltKeeper() {
+  halted = true;
+  log.warn({ event: 'keeper_halted' }, 'keeper halting due to LUPBelowHTP error');
 }
 
 // ============= Logging =============

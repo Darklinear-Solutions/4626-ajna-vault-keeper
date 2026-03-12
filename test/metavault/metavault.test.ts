@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import {
   getConfig,
   getExpectedSupplyAssets,
@@ -50,6 +50,10 @@ describe('reallocate', () => {
 
   beforeAll(async () => {
     snapshot = await client.request({ method: 'evm_snapshot' as any, params: [] as any });
+  });
+
+  afterAll(async () => {
+    await client.request({ method: 'evm_revert' as any, params: [snapshot] as any });
   });
 
   beforeEach(async () => {
