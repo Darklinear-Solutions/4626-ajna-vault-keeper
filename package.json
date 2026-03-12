@@ -9,8 +9,11 @@
   "scripts": {
     "test:ark:unit": "cp .env .env.test; vitest run --config vitest.ark.unit.config.ts && rm -f .env.test",
     "test:ark:integration": "cp .env .env.test; INTEGRATION=true vitest run --config vitest.ark.integration.config.ts && rm -f .env.test",
+    "test:ark": "pnpm run test:ark:unit && pnpm run test:ark:integration",
     "test:metavault:unit": "cp .env .env.test; METAVAULT=true vitest run --config vitest.metavault.unit.config.ts && rm -f .env.test",
-    "test": "pnpm run test:ark:unit && pnpm run test:ark:integration && pnpm run test:metavault:unit",
+    "test:metavault:integration": "cp .env .env.test; METAVAULT=true vitest run --config vitest.metavault.integration.config.ts && rm -f .env.test",
+    "test:metavault": "pnpm run test:metavault:unit && pnpm run test:metavault:integration",
+    "test": "pnpm run test:ark && pnpm run test:metavault",
     "format": "prettier --write \"src/**/*.{ts,js}\" \"test/**/*.{ts,js}\"",
     "build": "tsup src/index.ts --format esm --clean",
     "typecheck": "tsc -p tsconfig.json --noEmit",
