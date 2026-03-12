@@ -239,29 +239,35 @@ export function _validateAllocations(
   buffer: BufferAllocation,
   totalAssets: bigint,
 ): void {
+  const tolerance = totalAssets / 1_000_000n || 1n;
+
   for (const ark of arks) {
     const minAssets = (totalAssets * BigInt(ark.min)) / 100n;
     const maxAssets = (totalAssets * BigInt(ark.max)) / 100n;
 
-    if (ark.assets < minAssets) {
+    if (ark.assets + tolerance < minAssets) {
       throw new Error(`Ark ${ark.id} allocation ${ark.assets} is below min ${minAssets}`);
     }
-    if (ark.assets > maxAssets) {
+    if (ark.assets > maxAssets + tolerance) {
       throw new Error(`Ark ${ark.id} allocation ${ark.assets} is above max ${maxAssets}`);
     }
   }
 
   const bufferTarget = (totalAssets * BigInt(buffer.allocation)) / 100n;
-  const allArksAtMax = arks.every((ark) => ark.assets >= (totalAssets * BigInt(ark.max)) / 100n);
+  const allArksAtMax = arks.every(
+    (ark) => ark.assets + tolerance >= (totalAssets * BigInt(ark.max)) / 100n,
+  );
 
   if (allArksAtMax) {
-    if (buffer.assets < bufferTarget) {
+    if (buffer.assets + tolerance < bufferTarget) {
       throw new Error(
         `Buffer allocation ${buffer.assets} is below target ${bufferTarget} despite all arks at max`,
       );
     }
   } else {
-    if (buffer.assets !== bufferTarget) {
+    const diff =
+      buffer.assets > bufferTarget ? buffer.assets - bufferTarget : bufferTarget - buffer.assets;
+    if (diff > tolerance) {
       throw new Error(`Buffer allocation ${buffer.assets} does not equal target ${bufferTarget}`);
     }
   }

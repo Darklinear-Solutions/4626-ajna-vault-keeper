@@ -5,7 +5,7 @@ export default mergeConfig(
   base,
   defineConfig({
     test: {
-      include: ['test/integration/metavaultKeeper.test.ts'],
+      include: ['test/integration/metavaultKeeper.integration.test.ts'],
       exclude: ['node_modules/**', 'dist/**'],
     },
   }),
