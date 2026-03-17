@@ -12,6 +12,7 @@ import { log } from '../utils/logger';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction';
 import { selectBuckets } from '../ark/utils/selectBuckets';
 import { type Address, maxUint256 } from 'viem';
+import { env } from '../utils/env';
 
 // ============= Types =============
 
@@ -63,16 +64,16 @@ export async function run() {
   const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
 
   if (allocations.length === 0) {
-    return log.info({ event: 'no_reallocation_needed' }, 'no reallocation needed');
+    return log.info(
+      { event: 'no_metavault_reallocation_needed' },
+      'no metavault reallocation needed',
+    );
   }
 
   const gas = await getGasWithBuffer('metavault', 'reallocate', [allocations]);
   await handleTransaction(reallocate(allocations, gas), { action: 'reallocate' });
 
-  log.info(
-    { event: 'metavault_keeper_run_complete', allocations },
-    'metavault keeper run complete',
-  );
+  log.info({ event: 'metavault_run_complete', allocations }, 'metavault run complete');
 }
 
 // ============= Initialization =============
@@ -145,6 +146,7 @@ function _fillBuffer(
     if (available <= 0n) continue;
 
     const deduction = available < deficit ? available : deficit;
+    if (deduction < env.MIN_MOVE_AMOUNT) continue;
     ark.assets -= deduction;
     buffer.assets += deduction;
     deficit -= deduction;
@@ -169,6 +171,7 @@ function _drainBuffer(
     if (capacity <= 0n) continue;
 
     const addition = capacity < excess ? capacity : excess;
+    if (addition < env.MIN_MOVE_AMOUNT) continue;
     ark.assets += addition;
     buffer.assets -= addition;
     excess -= addition;
@@ -207,6 +210,7 @@ export function _reallocateForRates(
       if (capacity <= 0n) continue;
 
       const moveAmount = available < capacity ? available : capacity;
+      if (moveAmount < env.MIN_MOVE_AMOUNT) continue;
       ark.assets -= moveAmount;
       target.assets += moveAmount;
       available -= moveAmount;
@@ -291,6 +295,14 @@ export function _buildFinalAllocations(
   const increasing = all.filter((a) => a.assets > a.initialAssets);
 
   if (decreasing.length === 0 && increasing.length === 0) return [];
+
+  const totalWithdrawn = decreasing.reduce((sum, a) => sum + (a.initialAssets - a.assets), 0n);
+  const totalSupplied = increasing.reduce((sum, a) => sum + (a.assets - a.initialAssets), 0n);
+  if (totalWithdrawn !== totalSupplied) {
+    throw new Error(
+      `inconsistent reallocation: totalWithdrawn (${totalWithdrawn}) != totalSupplied (${totalSupplied})`,
+    );
+  }
 
   const ordered: MarketAllocation[] = [
     ...decreasing.map((a) => ({ id: a.id, assets: a.assets })),
