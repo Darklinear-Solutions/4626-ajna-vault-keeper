@@ -69,7 +69,10 @@ export async function run() {
   const gas = await getGasWithBuffer('metavault', 'reallocate', [allocations]);
   await handleTransaction(reallocate(allocations, gas), { action: 'reallocate' });
 
-  log.info({ event: 'metavault_keeper_run_complete' }, 'metavault keeper run complete');
+  log.info(
+    { event: 'metavault_keeper_run_complete', allocations },
+    'metavault keeper run complete',
+  );
 }
 
 // ============= Initialization =============
