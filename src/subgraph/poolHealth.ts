@@ -13,7 +13,7 @@ type LiquidationAuction = {
 };
 
 type VaultLike = {
-  getAddress: () => Address;
+  getAddress: () => Address | undefined;
   getPoolAddress: () => Promise<Address>;
   getAuctionStatus: (borrower: Address) => Promise<readonly [bigint, bigint, bigint, ...unknown[]]>;
 };
