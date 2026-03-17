@@ -13,6 +13,7 @@ type LiquidationAuction = {
 };
 
 type VaultLike = {
+  getAddress: () => Address;
   getPoolAddress: () => Promise<Address>;
   getAuctionStatus: (borrower: Address) => Promise<readonly [bigint, bigint, bigint, ...unknown[]]>;
 };
@@ -56,7 +57,7 @@ export async function _getUnsettledAuctions(
     return result;
   } catch (err) {
     log.error(
-      { event: 'subgraph_query_failed', url: env.SUBGRAPH_URL, err },
+      { event: 'subgraph_query_failed', url: env.SUBGRAPH_URL, ark: vault.getAddress(), err },
       'subgraph query failed',
     );
 

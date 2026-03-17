@@ -46,11 +46,15 @@ export async function run(address?: Address, vaultAuthAddress?: Address) {
   if (await poolHasBadDebt(vault)) return logRunExit('pool has bad debt');
 
   const gas = await getGasWithBuffer('pool', 'updateInterest', [], await vault.getPoolAddress());
-  await handleTransaction(vault.updateInterest(gas), { action: 'updateInterest' });
+  await handleTransaction(vault.updateInterest(gas), {
+    action: 'updateInterest',
+    ark: vault.getAddress(),
+  });
   const data = await _getKeeperData();
   await handleTransaction(vault.drain(data.optimalBucket), {
     action: 'drain',
     bucket: data.optimalBucket,
+    ark: vault.getAddress(),
   });
 
   if (!(await isOptimalBucketInRange(data)))
@@ -74,7 +78,11 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
 
   for (let i = 0; i < data.buckets.length; i++) {
     const bucket = data.buckets[i]!;
-    await handleTransaction(vault.drain(bucket), { action: 'drain', bucket });
+    await handleTransaction(vault.drain(bucket), {
+      action: 'drain',
+      bucket,
+      ark: vault.getAddress(),
+    });
 
     const bucketValue = await vault.lpToValue(bucket);
     const amountToMove = await poolBalanceCap(bucketValue, vault);
@@ -165,6 +173,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       action: 'moveFromBuffer',
       to: op.to,
       amount: op.amount,
+      ark: vault.getAddress(),
     });
   } else if (op.to === 'Buffer') {
     const gas = await getGasWithBuffer('vault', 'moveToBuffer', [op.from, op.amount]);
@@ -172,6 +181,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       action: 'moveToBuffer',
       from: op.from,
       amount: op.amount,
+      ark: vault.getAddress(),
     });
   } else {
     const gas = await getGasWithBuffer('vault', 'move', [op.from, op.to, op.amount]);
@@ -180,18 +190,24 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       from: op.from,
       to: op.to,
       amount: op.amount,
+      ark: vault.getAddress(),
     });
   }
 }
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
   if (halted) return;
-  await handleTransaction(vault.drain(targetBucket), { action: 'drain', bucket: targetBucket });
+  await handleTransaction(vault.drain(targetBucket), {
+    action: 'drain',
+    bucket: targetBucket,
+    ark: vault.getAddress(),
+  });
   const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [targetBucket, amount]);
   await handleTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
     action: 'moveFromBuffer',
     to: targetBucket,
     amount: amount,
+    ark: vault.getAddress(),
   });
 }
 
@@ -201,7 +217,11 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
 
   for (let i = 0; i < data.buckets.length && remaining > data.minAmount; i++) {
     const bucket = data.buckets[i]!;
-    await handleTransaction(vault.drain(bucket), { action: 'drain', bucket });
+    await handleTransaction(vault.drain(bucket), {
+      action: 'drain',
+      bucket,
+      ark: vault.getAddress(),
+    });
     const bucketValue = await vault.lpToValue(bucket);
 
     if (bucketValue < data.minAmount) continue;
@@ -300,6 +320,7 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
     await handleTransaction(vault.drain(initialBuckets[i]), {
       action: 'drain',
       bucket: initialBuckets[i],
+      ark: vault.getAddress(),
     });
   }
 
@@ -359,13 +380,19 @@ async function _refreshBufferValues(data: KeeperRunData) {
 
 export function haltKeeper() {
   halted = true;
-  log.warn({ event: 'keeper_halted' }, 'keeper halting due to LUPBelowHTP error');
+  log.warn(
+    { event: 'ark_run_halted', ark: vault.getAddress() },
+    `ark run halting due to LUPBelowHTP error for ark ${vault.getAddress()}`,
+  );
 }
 
 // ============= Logging =============
 
 function logRunExit(reason: string) {
-  log.warn({ event: 'keeper_run_aborted', reason }, 'keeper run aborted');
+  log.warn(
+    { event: 'ark_run_aborted', ark: vault.getAddress(), reason },
+    `ark run aborted for ark ${vault.getAddress()}`,
+  );
 }
 
 async function logFinalState(data: KeeperRunData): Promise<void> {
@@ -373,12 +400,13 @@ async function logFinalState(data: KeeperRunData): Promise<void> {
 
   log.info(
     {
-      event: 'keeper_run_complete',
+      event: 'ark_run_complete',
+      ark: vault.getAddress(),
       bufferTotal: finalBufferTotal,
       bufferTarget: data.bufferTarget,
       quoteTokenPrice: data.price,
       optimalBucket: data.optimalBucket,
     },
-    'keeper run complete',
+    `ark run complete for ark ${vault.getAddress()}`,
   );
 }
