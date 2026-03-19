@@ -389,7 +389,7 @@ export function haltKeeper() {
 // ============= Logging =============
 
 function logRunExit(reason: string) {
-  log.warn(
+  log.error(
     { event: 'ark_run_aborted', ark: vault.getAddress(), reason },
     `ark run aborted for ark ${vault.getAddress()}`,
   );

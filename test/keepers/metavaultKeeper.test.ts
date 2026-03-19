@@ -9,6 +9,7 @@ import {
   type BufferAllocation,
 } from '../../src/keepers/metavaultKeeper';
 import { type ArkEvaluation } from '../../src/metavault/utils/evaluateRates';
+import { type MarketAllocation } from '../../src/metavault/metavault';
 import { type createVault } from '../../src/ark/vault';
 import { type Address, maxUint256 } from 'viem';
 
@@ -464,25 +465,25 @@ describe('_validateAllocations', () => {
     ];
     const buffer = makeBuffer({ assets: 400n * S, allocation: 40 });
 
-    expect(() => _validateAllocations(arks, buffer, totalAssets)).not.toThrow();
+    expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
-  it('throws when ark is below min', () => {
+  it('returns error when ark is below min', () => {
     const arks = [
       makeArk({ id: ADDR_A, assets: 30n * S, min: 5, max: 20 }), // 30*S < 50*S (5%)
     ];
     const buffer = makeBuffer({ assets: 400n * S });
 
-    expect(() => _validateAllocations(arks, buffer, totalAssets)).toThrow('below min');
+    expect(_validateAllocations(arks, buffer, totalAssets)).toContain('below min');
   });
 
-  it('throws when ark is above max', () => {
+  it('returns error when ark is above max', () => {
     const arks = [
       makeArk({ id: ADDR_A, assets: 250n * S, min: 5, max: 20 }), // 250*S > 200*S (20%)
     ];
     const buffer = makeBuffer({ assets: 400n * S });
 
-    expect(() => _validateAllocations(arks, buffer, totalAssets)).toThrow('above max');
+    expect(_validateAllocations(arks, buffer, totalAssets)).toContain('above max');
   });
 
   it('passes when arks at exact min and max boundaries', () => {
@@ -492,14 +493,14 @@ describe('_validateAllocations', () => {
     ];
     const buffer = makeBuffer({ assets: 400n * S });
 
-    expect(() => _validateAllocations(arks, buffer, totalAssets)).not.toThrow();
+    expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
-  it('throws when buffer does not equal target and not all arks at max', () => {
+  it('returns error when buffer does not equal target and not all arks at max', () => {
     const arks = [makeArk({ id: ADDR_A, assets: 100n * S, min: 5, max: 20 })];
     const buffer = makeBuffer({ assets: 350n * S, allocation: 40 }); // 350*S !== 400*S
 
-    expect(() => _validateAllocations(arks, buffer, totalAssets)).toThrow('does not equal target');
+    expect(_validateAllocations(arks, buffer, totalAssets)).toContain('does not equal target');
   });
 
   it('passes when all arks at max and buffer above target', () => {
@@ -509,24 +510,24 @@ describe('_validateAllocations', () => {
     ];
     const buffer = makeBuffer({ assets: 500n * S, allocation: 40 }); // 500*S > 400*S
 
-    expect(() => _validateAllocations(arks, buffer, totalAssets)).not.toThrow();
+    expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
   it('passes when all arks at max and buffer exactly at target', () => {
     const arks = [makeArk({ id: ADDR_A, assets: 200n * S, min: 5, max: 20 })];
     const buffer = makeBuffer({ assets: 400n * S, allocation: 40 });
 
-    expect(() => _validateAllocations(arks, buffer, totalAssets)).not.toThrow();
+    expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
-  it('throws when all arks at max but buffer below target', () => {
+  it('returns error when all arks at max but buffer below target', () => {
     const arks = [
       makeArk({ id: ADDR_A, assets: 200n * S, min: 5, max: 20 }),
       makeArk({ id: ADDR_B, assets: 200n * S, min: 5, max: 20 }),
     ];
     const buffer = makeBuffer({ assets: 350n * S, allocation: 40 }); // 350*S < 400*S
 
-    expect(() => _validateAllocations(arks, buffer, totalAssets)).toThrow('below target');
+    expect(_validateAllocations(arks, buffer, totalAssets)).toContain('below target');
   });
 });
 
@@ -551,7 +552,7 @@ describe('_buildFinalAllocations', () => {
     ];
     const buffer = makeBuffer({ assets: 400n * S, initialAssets: 400n * S });
 
-    const result = _buildFinalAllocations(arks, buffer);
+    const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
 
     expect(result[0]!.id).toBe(ADDR_A); // decreasing first
     expect(result[0]!.assets).toBe(200n * S);
@@ -565,7 +566,7 @@ describe('_buildFinalAllocations', () => {
     ];
     const buffer = makeBuffer({ assets: 400n * S, initialAssets: 400n * S });
 
-    const result = _buildFinalAllocations(arks, buffer);
+    const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
 
     expect(result[result.length - 1]!.assets).toBe(maxUint256);
   });
@@ -579,7 +580,7 @@ describe('_buildFinalAllocations', () => {
     const buffer = makeBuffer({ assets: 350n * S, initialAssets: 400n * S }); // decreasing (-50)
 
     // totalWithdrawn = 70 + 50 = 120, totalSupplied = 50 + 70 = 120
-    const result = _buildFinalAllocations(arks, buffer);
+    const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
 
     const decreasingIds = result.slice(0, 2).map((a) => a.id);
     expect(decreasingIds).toContain(ADDR_A);
@@ -598,7 +599,7 @@ describe('_buildFinalAllocations', () => {
     const buffer = makeBuffer({ assets: 350n * S, initialAssets: 500n * S }); // decreasing
 
     // sum(dec assets) = 350*S, sum(inc assets) = 350*S
-    const result = _buildFinalAllocations(arks, buffer);
+    const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
 
     expect(result.length).toBe(2);
     expect(result[0]!.id).toBe(ADDR_BUF); // decreasing
@@ -607,28 +608,28 @@ describe('_buildFinalAllocations', () => {
     expect(result[1]!.assets).toBe(maxUint256);
   });
 
-  it('throws when only decreasing entries exist with no increasing', () => {
+  it('returns error when only decreasing entries exist with no increasing', () => {
     const arks = [makeArk({ id: ADDR_A, assets: 80n * S, initialAssets: 100n * S })];
     const buffer = makeBuffer({ assets: 380n * S, initialAssets: 400n * S });
 
-    expect(() => _buildFinalAllocations(arks, buffer)).toThrow('inconsistent reallocation');
+    expect(_buildFinalAllocations(arks, buffer)).toContain('inconsistent reallocation');
   });
 
-  it('throws when only increasing entries exist with no decreasing', () => {
+  it('returns error when only increasing entries exist with no decreasing', () => {
     const arks = [makeArk({ id: ADDR_A, assets: 120n * S, initialAssets: 100n * S })];
     const buffer = makeBuffer({ assets: 420n * S, initialAssets: 400n * S });
 
-    expect(() => _buildFinalAllocations(arks, buffer)).toThrow('inconsistent reallocation');
+    expect(_buildFinalAllocations(arks, buffer)).toContain('inconsistent reallocation');
   });
 
-  it('throws when increasing and decreasing deltas are mismatched', () => {
+  it('returns error when increasing and decreasing deltas are mismatched', () => {
     const arks = [
       makeArk({ id: ADDR_A, assets: 80n * S, initialAssets: 100n * S }), // withdrawn: 20
     ];
     const buffer = makeBuffer({ assets: 450n * S, initialAssets: 400n * S }); // supplied: 50
 
     // totalWithdrawn = 20, totalSupplied = 50 — not equal
-    expect(() => _buildFinalAllocations(arks, buffer)).toThrow('inconsistent reallocation');
+    expect(_buildFinalAllocations(arks, buffer)).toContain('inconsistent reallocation');
   });
 
   it('buffer can be the last increasing entry and receive maxUint256', () => {
@@ -638,7 +639,7 @@ describe('_buildFinalAllocations', () => {
     const buffer = makeBuffer({ assets: 350n * S, initialAssets: 200n * S }); // increasing
 
     // sum(dec assets) = 350*S, sum(inc assets) = 350*S
-    const result = _buildFinalAllocations(arks, buffer);
+    const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
 
     expect(result[0]!.id).toBe(ADDR_A);
     expect(result[0]!.assets).toBe(350n * S);

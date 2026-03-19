@@ -67,9 +67,11 @@ export async function run() {
 
   await _executeMoveToBufferCalls(arkAllocations);
 
-  _validateAllocations(arkAllocations, bufferAllocation, totalAssets);
+  const validationError = _validateAllocations(arkAllocations, bufferAllocation, totalAssets);
+  if (validationError) return _logRunExit(validationError);
 
   const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
+  if (typeof allocations === 'string') return _logRunExit(allocations);
 
   if (allocations.length === 0) {
     return log.info(
@@ -263,7 +265,7 @@ export function _validateAllocations(
   arks: ArkAllocation[],
   buffer: BufferAllocation,
   totalAssets: bigint,
-): void {
+): string | null {
   const tolerance = totalAssets / 1_000_000n || 1n;
 
   for (const ark of arks) {
@@ -271,10 +273,10 @@ export function _validateAllocations(
     const maxAssets = (totalAssets * BigInt(ark.max)) / 100n;
 
     if (ark.assets + tolerance < minAssets) {
-      throw new Error(`Ark ${ark.id} allocation ${ark.assets} is below min ${minAssets}`);
+      return `Ark ${ark.id} allocation ${ark.assets} is below min ${minAssets}`;
     }
     if (ark.assets > maxAssets + tolerance) {
-      throw new Error(`Ark ${ark.id} allocation ${ark.assets} is above max ${maxAssets}`);
+      return `Ark ${ark.id} allocation ${ark.assets} is above max ${maxAssets}`;
     }
   }
 
@@ -285,17 +287,17 @@ export function _validateAllocations(
 
   if (allArksAtMax) {
     if (buffer.assets + tolerance < bufferTarget) {
-      throw new Error(
-        `Buffer allocation ${buffer.assets} is below target ${bufferTarget} despite all arks at max`,
-      );
+      return `Buffer allocation ${buffer.assets} is below target ${bufferTarget} despite all arks at max`;
     }
   } else {
     const diff =
       buffer.assets > bufferTarget ? buffer.assets - bufferTarget : bufferTarget - buffer.assets;
     if (diff > tolerance) {
-      throw new Error(`Buffer allocation ${buffer.assets} does not equal target ${bufferTarget}`);
+      return `Buffer allocation ${buffer.assets} does not equal target ${bufferTarget}`;
     }
   }
+
+  return null;
 }
 
 // ============= Final Allocation Building =============
@@ -303,7 +305,7 @@ export function _validateAllocations(
 export function _buildFinalAllocations(
   arks: ArkAllocation[],
   buffer: BufferAllocation,
-): MarketAllocation[] {
+): MarketAllocation[] | string {
   const all: { id: Address; assets: bigint; initialAssets: bigint }[] = [
     ...arks.map((a) => ({ id: a.id, assets: a.assets, initialAssets: a.initialAssets })),
     { id: buffer.id, assets: buffer.assets, initialAssets: buffer.initialAssets },
@@ -317,9 +319,7 @@ export function _buildFinalAllocations(
   const totalWithdrawn = decreasing.reduce((sum, a) => sum + (a.initialAssets - a.assets), 0n);
   const totalSupplied = increasing.reduce((sum, a) => sum + (a.assets - a.initialAssets), 0n);
   if (totalWithdrawn !== totalSupplied) {
-    throw new Error(
-      `inconsistent reallocation: totalWithdrawn (${totalWithdrawn}) != totalSupplied (${totalSupplied})`,
-    );
+    return `inconsistent reallocation: totalWithdrawn (${totalWithdrawn}) != totalSupplied (${totalSupplied})`;
   }
 
   const ordered: MarketAllocation[] = [
@@ -335,6 +335,10 @@ export function _buildFinalAllocations(
 }
 
 // ============= Helpers =============
+
+function _logRunExit(reason: string) {
+  log.error({ event: 'metavault_run_aborted', reason }, `metavault run aborted: ${reason}`);
+}
 
 function _toArks(allocations: ArkAllocation[]): Ark[] {
   return allocations.map((a) => ({
