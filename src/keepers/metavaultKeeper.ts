@@ -43,6 +43,14 @@ export type BufferAllocation = {
 // ============= Main Run Function =============
 
 export async function run() {
+  const pausedArks = await _getPausedArks();
+  if (pausedArks.length > 0) {
+    return log.info(
+      { event: 'paused_arks_detected', arks: pausedArks },
+      'skipping run: one or more arks are paused',
+    );
+  }
+
   const strategyAddresses = [config.buffer.address, ...config.arks.map((ark) => ark.address)];
   const totalAssets = (await getTotalExpectedSupplyAssets(strategyAddresses)) as bigint;
   const arkAllocations = await _buildArkAllocations();
@@ -83,12 +91,6 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
 
   for (const arkConfig of config.arks) {
     const vault = createVault(arkConfig.address);
-
-    if (await vault.isPaused()) {
-      log.info({ event: 'ark_paused', ark: arkConfig.address }, 'skipping paused ark');
-      continue;
-    }
-
     const balance = (await getExpectedSupplyAssets(arkConfig.address)) as bigint;
     const cappedBalance = await poolBalanceCap(balance, vault);
     const rate = (await vault.getBorrowFeeRate()) as bigint;
@@ -125,6 +127,15 @@ export function _rebalanceBuffer(
   buffer: BufferAllocation,
   totalAssets: bigint,
 ): void {
+  for (const ark of arks) {
+    const maxAssets = (totalAssets * BigInt(ark.max)) / 100n;
+    if (ark.assets > maxAssets) {
+      const excess = ark.assets - maxAssets;
+      ark.assets -= excess;
+      buffer.assets += excess;
+    }
+  }
+
   const bufferTarget = (totalAssets * BigInt(buffer.allocation)) / 100n;
 
   if (buffer.assets < bufferTarget) {
@@ -332,4 +343,15 @@ function _toArks(allocations: ArkAllocation[]): Ark[] {
     max: a.max,
     rate: a.rate,
   }));
+}
+
+async function _getPausedArks(): Promise<Address[]> {
+  const paused: Address[] = [];
+  for (const arkConfig of config.arks) {
+    const vault = createVault(arkConfig.address);
+    if (await vault.isPaused()) {
+      paused.push(arkConfig.address);
+    }
+  }
+  return paused;
 }

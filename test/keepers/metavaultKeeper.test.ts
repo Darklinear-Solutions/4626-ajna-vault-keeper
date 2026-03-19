@@ -175,6 +175,23 @@ describe('_rebalanceBuffer', () => {
       expect(arks[0]!.assets).toBe(50n * S);
       expect(buffer.assets).toBe(400n * S);
     });
+
+    it('skips deduction when amount is below MIN_MOVE_AMOUNT', () => {
+      // Ark B has only 1*S above its min — below MIN_MOVE_AMOUNT (1_000_001)
+      const arks = [
+        makeArk({ id: ADDR_A, assets: 200n * S, rate: 200n }),
+        makeArk({ id: ADDR_B, assets: 51n * S, rate: 100n }), // available = 51*S - 50*S = 1*S < MIN_MOVE_AMOUNT
+      ];
+      const buffer = makeBuffer({ assets: 399n * S });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      // B's deduction (1*S) is below MIN_MOVE_AMOUNT, so it's skipped.
+      // A's deduction (1*S of the remaining deficit) is also below MIN_MOVE_AMOUNT.
+      expect(arks[1]!.assets).toBe(51n * S); // B unchanged
+      expect(arks[0]!.assets).toBe(200n * S); // A unchanged
+      expect(buffer.assets).toBe(399n * S); // buffer unchanged
+    });
   });
 
   describe('buffer excess (drainBuffer)', () => {
@@ -245,6 +262,23 @@ describe('_rebalanceBuffer', () => {
       expect(arks[2]!.assets).toBe(200n * S);
       expect(arks[1]!.assets).toBe(200n * S);
       expect(buffer.assets).toBe(400n * S);
+    });
+
+    it('skips addition when amount is below MIN_MOVE_AMOUNT', () => {
+      // Ark B has only 1*S capacity — below MIN_MOVE_AMOUNT (1_000_001)
+      const arks = [
+        makeArk({ id: ADDR_A, assets: 100n * S, rate: 100n }),
+        makeArk({ id: ADDR_B, assets: 199n * S, rate: 200n }), // capacity = 200*S - 199*S = 1*S < MIN_MOVE_AMOUNT
+      ];
+      const buffer = makeBuffer({ assets: 401n * S });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      // B's addition (1*S) is below MIN_MOVE_AMOUNT, so it's skipped.
+      // A's addition (1*S of remaining excess) is also below MIN_MOVE_AMOUNT.
+      expect(arks[1]!.assets).toBe(199n * S); // B unchanged
+      expect(arks[0]!.assets).toBe(100n * S); // A unchanged
+      expect(buffer.assets).toBe(401n * S); // buffer unchanged
     });
   });
 });
@@ -396,6 +430,25 @@ describe('_reallocateForRates', () => {
 
     expect(arks[0]!.assets).toBe(150n * S);
     expect(arks[1]!.assets).toBe(150n * S);
+  });
+
+  it('skips move when amount is below MIN_MOVE_AMOUNT', () => {
+    // A has 1*S above min, B has 1*S capacity — both below MIN_MOVE_AMOUNT
+    const arks = [
+      makeArk({ id: ADDR_A, assets: 51n * S, min: 5, max: 20, rate: 100n }),
+      makeArk({ id: ADDR_B, assets: 199n * S, min: 5, max: 20, rate: 200n }),
+    ];
+    const evaluations: ArkEvaluation[] = [
+      { address: ADDR_A, targets: [ADDR_B] },
+      { address: ADDR_B, targets: [] },
+    ];
+
+    _reallocateForRates(arks, evaluations, 1000n * S);
+
+    // A's available = 51*S - 50*S = 1*S, B's capacity = 200*S - 199*S = 1*S
+    // Move amount = min(1*S, 1*S) = 1*S < MIN_MOVE_AMOUNT — skipped
+    expect(arks[0]!.assets).toBe(51n * S);
+    expect(arks[1]!.assets).toBe(199n * S);
   });
 });
 

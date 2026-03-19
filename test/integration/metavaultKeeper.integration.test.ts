@@ -7,6 +7,7 @@ import {
 } from '../../src/metavault/metavault';
 import { config } from '../../src/utils/config';
 import { client } from '../../src/utils/client';
+import { contract } from '../../src/utils/contract';
 import { type Address } from 'viem';
 
 describe('metavault keeper run', () => {
@@ -117,5 +118,183 @@ describe('metavault keeper run', () => {
 
     // Total should be the same (within rounding tolerance)
     expect(Number(after.totalAssets) / 1e18).toBeCloseTo(Number(before.totalAssets) / 1e18, 0);
+  });
+
+  it('skips entire run when any ark is paused', async () => {
+    // First run to distribute funds normally
+    await run();
+    const afterFirstRun = await getBalances();
+
+    // Pause the first ark
+    const arkAuthAddress = process.env.ARK_AUTH_1_ADDRESS as Address;
+    const arkAuth = contract('vaultAuth', arkAuthAddress);
+    await arkAuth().write.pause();
+
+    // Second run should be a no-op (early return due to paused ark)
+    await run();
+
+    // Unpause and verify nothing changed
+    await arkAuth().write.unpause();
+    const afterSecondRun = await getBalances();
+
+    const tolerance = afterFirstRun.totalAssets / 1_000_000n || 1n;
+    for (let i = 0; i < config.arks.length; i++) {
+      const diff =
+        afterSecondRun.arkBalances[i]! > afterFirstRun.arkBalances[i]!
+          ? afterSecondRun.arkBalances[i]! - afterFirstRun.arkBalances[i]!
+          : afterFirstRun.arkBalances[i]! - afterSecondRun.arkBalances[i]!;
+      expect(diff).toBeLessThanOrEqual(tolerance);
+    }
+  });
+
+  it('rebalances correctly after additional deposit into metavault', async () => {
+    // First run to establish initial allocations
+    await run();
+    const afterFirstRun = await getBalances();
+
+    // Deposit additional funds into the metavault (goes to buffer via supply queue)
+    const metavault = contract('metavault');
+    const quoteTokenAddress = (await metavault().read.asset()) as Address;
+    const depositAmount = 100n * 10n ** 18n;
+    const erc20ApproveAbi = [
+      {
+        name: 'approve',
+        type: 'function' as const,
+        stateMutability: 'nonpayable' as const,
+        inputs: [
+          { name: 'spender', type: 'address' },
+          { name: 'amount', type: 'uint256' },
+        ],
+        outputs: [{ name: '', type: 'bool' }],
+      },
+    ];
+    await client.writeContract({
+      address: quoteTokenAddress,
+      abi: erc20ApproveAbi,
+      functionName: 'approve',
+      args: [process.env.METAVAULT_ADDRESS as Address, depositAmount],
+    });
+    await metavault().write.deposit([depositAmount, client.account.address]);
+
+    const afterDeposit = await getBalances();
+    expect(afterDeposit.totalAssets).toBeGreaterThan(afterFirstRun.totalAssets);
+
+    // Second run should redistribute the excess
+    await run();
+    const afterSecondRun = await getBalances();
+
+    const tolerance = afterSecondRun.totalAssets / 1_000_000n || 1n;
+
+    // Buffer should be back near its target
+    const bufferTarget = (afterSecondRun.totalAssets * BigInt(config.buffer.allocation)) / 100n;
+    const bufferDiff =
+      afterSecondRun.bufferBalance > bufferTarget
+        ? afterSecondRun.bufferBalance - bufferTarget
+        : bufferTarget - afterSecondRun.bufferBalance;
+    expect(bufferDiff).toBeLessThanOrEqual(tolerance);
+
+    // All arks should be within bounds
+    for (let i = 0; i < config.arks.length; i++) {
+      const arkConfig = config.arks[i]!;
+      const minAssets = (afterSecondRun.totalAssets * BigInt(arkConfig.allocation.min)) / 100n;
+      const maxAssets = (afterSecondRun.totalAssets * BigInt(arkConfig.allocation.max)) / 100n;
+      expect(afterSecondRun.arkBalances[i]!).toBeGreaterThanOrEqual(minAssets - tolerance);
+      expect(afterSecondRun.arkBalances[i]!).toBeLessThanOrEqual(maxAssets + tolerance);
+    }
+  });
+
+  it('sum of all strategy balances equals totalAssets after reallocation', async () => {
+    await run();
+    const after = await getBalances();
+
+    const sumOfBalances = after.bufferBalance + after.arkBalances.reduce((sum, b) => sum + b, 0n);
+    const tolerance = after.totalAssets / 1_000_000n || 1n;
+
+    const diff =
+      sumOfBalances > after.totalAssets
+        ? sumOfBalances - after.totalAssets
+        : after.totalAssets - sumOfBalances;
+    expect(diff).toBeLessThanOrEqual(tolerance);
+  });
+
+  it('rebalances after a withdrawal reduces total assets', async () => {
+    // First run distributes funds to arks
+    await run();
+    const afterFirstRun = await getBalances();
+
+    // Withdraw from the metavault to reduce total assets, making arks overweight
+    const metavault = contract('metavault');
+    const withdrawAmount = 100n * 10n ** 18n;
+    await metavault().write.withdraw([
+      withdrawAmount,
+      client.account.address,
+      client.account.address,
+    ]);
+
+    const afterWithdraw = await getBalances();
+    expect(afterWithdraw.totalAssets).toBeLessThan(afterFirstRun.totalAssets);
+
+    // Run again — should move funds from arks back to buffer to rebalance
+    await run();
+    const afterSecondRun = await getBalances();
+
+    const tolerance = afterSecondRun.totalAssets / 1_000_000n || 1n;
+
+    // Buffer should be near target for the new total
+    const bufferTarget = (afterSecondRun.totalAssets * BigInt(config.buffer.allocation)) / 100n;
+    const bufferDiff =
+      afterSecondRun.bufferBalance > bufferTarget
+        ? afterSecondRun.bufferBalance - bufferTarget
+        : bufferTarget - afterSecondRun.bufferBalance;
+    expect(bufferDiff).toBeLessThanOrEqual(tolerance);
+
+    // All arks should be within bounds relative to new total
+    for (let i = 0; i < config.arks.length; i++) {
+      const arkConfig = config.arks[i]!;
+      const minAssets = (afterSecondRun.totalAssets * BigInt(arkConfig.allocation.min)) / 100n;
+      const maxAssets = (afterSecondRun.totalAssets * BigInt(arkConfig.allocation.max)) / 100n;
+      expect(afterSecondRun.arkBalances[i]!).toBeGreaterThanOrEqual(minAssets - tolerance);
+      expect(afterSecondRun.arkBalances[i]!).toBeLessThanOrEqual(maxAssets + tolerance);
+    }
+
+    // Total assets preserved post-rebalance
+    expect(Number(afterSecondRun.totalAssets) / 1e18).toBeCloseTo(
+      Number(afterWithdraw.totalAssets) / 1e18,
+      0,
+    );
+  });
+
+  it('rebalances to include previously paused ark after unpause', async () => {
+    // Pause ark 1 before the first run
+    const arkAuthAddress = process.env.ARK_AUTH_1_ADDRESS as Address;
+    const arkAuth = contract('vaultAuth', arkAuthAddress);
+    await arkAuth().write.pause();
+
+    // Run with ark 1 paused — it should be excluded
+    await run();
+    const whilePaused = await getBalances();
+
+    // Ark 1 should have received nothing (it started empty and was paused)
+    expect(whilePaused.arkBalances[0]!).toBe(0n);
+
+    // Unpause ark 1
+    await arkAuth().write.unpause();
+
+    // Run again — should now include ark 1 in rebalancing
+    await run();
+    const afterUnpause = await getBalances();
+
+    // Ark 1 should now have funds
+    expect(afterUnpause.arkBalances[0]!).toBeGreaterThan(0n);
+
+    // All arks should be within bounds
+    const tolerance = afterUnpause.totalAssets / 1_000_000n || 1n;
+    for (let i = 0; i < config.arks.length; i++) {
+      const arkConfig = config.arks[i]!;
+      const minAssets = (afterUnpause.totalAssets * BigInt(arkConfig.allocation.min)) / 100n;
+      const maxAssets = (afterUnpause.totalAssets * BigInt(arkConfig.allocation.max)) / 100n;
+      expect(afterUnpause.arkBalances[i]!).toBeGreaterThanOrEqual(minAssets - tolerance);
+      expect(afterUnpause.arkBalances[i]!).toBeLessThanOrEqual(maxAssets + tolerance);
+    }
   });
 });
