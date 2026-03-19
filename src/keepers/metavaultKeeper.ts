@@ -83,6 +83,12 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
 
   for (const arkConfig of config.arks) {
     const vault = createVault(arkConfig.address);
+
+    if (await vault.isPaused()) {
+      log.info({ event: 'ark_paused', ark: arkConfig.address }, 'skipping paused ark');
+      continue;
+    }
+
     const balance = (await getExpectedSupplyAssets(arkConfig.address)) as bigint;
     const cappedBalance = await poolBalanceCap(balance, vault);
     const rate = (await vault.getBorrowFeeRate()) as bigint;
