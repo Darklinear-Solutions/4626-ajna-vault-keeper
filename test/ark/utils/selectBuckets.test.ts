@@ -8,6 +8,8 @@ function makeVault(
   buckets: bigint[],
   values: Record<string, bigint>,
   prices: Record<string, bigint>,
+  lps?: Record<string, bigint>,
+  dustThreshold: bigint = 1_000_001n,
 ): Vault {
   return {
     getBuckets: vi.fn().mockResolvedValue(buckets),
@@ -17,103 +19,191 @@ function makeVault(
     getIndexToPrice: vi
       .fn()
       .mockImplementation((index: bigint) => Promise.resolve(prices[index.toString()] ?? 0n)),
+    getBucketLps: vi
+      .fn()
+      .mockImplementation((bucket: bigint) =>
+        Promise.resolve(lps ? (lps[bucket.toString()] ?? 0n) : (values[bucket.toString()] ?? 0n)),
+      ),
+    getDustThreshold: vi.fn().mockResolvedValue(dustThreshold),
   } as unknown as Vault;
 }
+
+// Scale factor so bucket values are well above the dust threshold (1_000_001)
+const S = 1_000_000n;
 
 describe('selectBuckets', () => {
   it('returns single bucket when exactly one has enough funds', async () => {
     const vault = makeVault(
       [100n, 200n, 300n],
-      { '100': 50n, '200': 500n, '300': 10n },
+      { '100': 50n * S, '200': 500n * S, '300': 10n * S },
       { '100': 1000n, '200': 900n, '300': 800n },
     );
 
-    const result = await selectBuckets(vault, 200n);
-    expect(result).toEqual([{ bucket: 200n, amount: 200n }]);
+    const result = await selectBuckets(vault, 200n * S);
+    expect(result).toEqual([{ bucket: 200n, amount: 200n * S }]);
   });
 
   it('returns lowest-price bucket when multiple have enough funds', async () => {
     const vault = makeVault(
       [100n, 200n, 300n],
-      { '100': 500n, '200': 500n, '300': 500n },
+      { '100': 500n * S, '200': 500n * S, '300': 500n * S },
       { '100': 1000n, '200': 800n, '300': 900n },
     );
 
-    const result = await selectBuckets(vault, 200n);
-    expect(result).toEqual([{ bucket: 200n, amount: 200n }]);
+    const result = await selectBuckets(vault, 200n * S);
+    expect(result).toEqual([{ bucket: 200n, amount: 200n * S }]);
   });
 
   it('returns multiple buckets ordered by value desc when none have enough', async () => {
     const vault = makeVault(
       [100n, 200n, 300n],
-      { '100': 30n, '200': 80n, '300': 50n },
+      { '100': 30n * S, '200': 80n * S, '300': 50n * S },
       { '100': 1000n, '200': 900n, '300': 800n },
     );
 
-    const result = await selectBuckets(vault, 120n);
+    const result = await selectBuckets(vault, 120n * S);
     expect(result).toEqual([
-      { bucket: 200n, amount: 80n },
-      { bucket: 300n, amount: 40n },
+      { bucket: 200n, amount: 80n * S },
+      { bucket: 300n, amount: 40n * S },
     ]);
   });
 
   it('uses all buckets when total value just barely covers amount', async () => {
     const vault = makeVault(
       [100n, 200n],
-      { '100': 40n, '200': 60n },
+      { '100': 40n * S, '200': 60n * S },
       { '100': 1000n, '200': 900n },
     );
 
-    const result = await selectBuckets(vault, 100n);
+    const result = await selectBuckets(vault, 100n * S);
     expect(result).toEqual([
-      { bucket: 200n, amount: 60n },
-      { bucket: 100n, amount: 40n },
+      { bucket: 200n, amount: 60n * S },
+      { bucket: 100n, amount: 40n * S },
     ]);
   });
 
   it('returns empty array when all buckets have zero value', async () => {
     const vault = makeVault([100n, 200n], { '100': 0n, '200': 0n }, { '100': 1000n, '200': 900n });
 
-    const result = await selectBuckets(vault, 100n);
+    const result = await selectBuckets(vault, 100n * S);
     expect(result).toEqual([]);
   });
 
   it('returns empty array when no buckets exist', async () => {
     const vault = makeVault([], {}, {});
-    const result = await selectBuckets(vault, 100n);
+    const result = await selectBuckets(vault, 100n * S);
     expect(result).toEqual([]);
   });
 
   it('skips zero-value buckets in multi-bucket scenario', async () => {
     const vault = makeVault(
       [100n, 200n, 300n],
-      { '100': 0n, '200': 40n, '300': 30n },
+      { '100': 0n, '200': 40n * S, '300': 30n * S },
       { '100': 1000n, '200': 900n, '300': 800n },
     );
 
-    const result = await selectBuckets(vault, 60n);
+    const result = await selectBuckets(vault, 60n * S);
     expect(result).toEqual([
-      { bucket: 200n, amount: 40n },
-      { bucket: 300n, amount: 20n },
+      { bucket: 200n, amount: 40n * S },
+      { bucket: 300n, amount: 20n * S },
     ]);
   });
 
   it('picks the single sufficient bucket regardless of price when only one qualifies', async () => {
-    // Bucket 300 has a high price but is the only one with enough funds
     const vault = makeVault(
       [100n, 200n, 300n],
-      { '100': 10n, '200': 10n, '300': 500n },
+      { '100': 10n * S, '200': 10n * S, '300': 500n * S },
       { '100': 100n, '200': 200n, '300': 9999n },
     );
 
-    const result = await selectBuckets(vault, 100n);
-    expect(result).toEqual([{ bucket: 300n, amount: 100n }]);
+    const result = await selectBuckets(vault, 100n * S);
+    expect(result).toEqual([{ bucket: 300n, amount: 100n * S }]);
   });
 
   it('handles single bucket vault', async () => {
-    const vault = makeVault([100n], { '100': 500n }, { '100': 1000n });
+    const vault = makeVault([100n], { '100': 500n * S }, { '100': 1000n });
 
-    const result = await selectBuckets(vault, 200n);
-    expect(result).toEqual([{ bucket: 100n, amount: 200n }]);
+    const result = await selectBuckets(vault, 200n * S);
+    expect(result).toEqual([{ bucket: 100n, amount: 200n * S }]);
+  });
+
+  describe('dust prevention', () => {
+    const DUST = 1_000_001n;
+
+    it('takes full bucket when partial withdrawal would leave dusty LPs (single sufficient)', async () => {
+      // Bucket has 200*S value and 200*S LPs (1:1 ratio).
+      // We want 199*S. Remaining LPs ≈ 200*S - 199*S = 1*S = 1_000_000 < DUST.
+      const vault = makeVault([100n], { '100': 200n * S }, { '100': 1000n }, { '100': 200n * S });
+
+      const result = await selectBuckets(vault, 199n * S);
+      expect(result).toEqual([{ bucket: 100n, amount: 200n * S }]);
+    });
+
+    it('takes full bucket when partial withdrawal would leave dusty LPs (multiple sufficient)', async () => {
+      const vault = makeVault(
+        [100n, 200n],
+        { '100': 200n * S, '200': 300n * S },
+        { '100': 800n, '200': 900n },
+        { '100': 200n * S, '200': 300n * S },
+      );
+
+      // Lowest price is bucket 100. We want 199*S from a 200*S bucket.
+      // Remaining LPs = 200*S - (200*S * 199*S / 200*S) = 1*S = 1_000_000 < DUST. Take full.
+      const result = await selectBuckets(vault, 199n * S);
+      expect(result).toEqual([{ bucket: 100n, amount: 200n * S }]);
+    });
+
+    it('takes full bucket when partial withdrawal would leave dusty LPs (multi-bucket fallback)', async () => {
+      // No single bucket has enough. We need 120*S.
+      // Sorted by value desc: 200(80*S), 300(41*S), 100(30*S).
+      // 200: 80*S < 120*S, take all 80*S. Remaining = 40*S.
+      // 300: value 41*S >= 40*S. LPs = 41*S. Remaining LPs = 41*S - (41*S * 40*S / 41*S) = 1*S < DUST.
+      const vault = makeVault(
+        [100n, 200n, 300n],
+        { '100': 30n * S, '200': 80n * S, '300': 41n * S },
+        { '100': 1000n, '200': 900n, '300': 800n },
+        { '100': 30n * S, '200': 80n * S, '300': 41n * S },
+      );
+
+      const result = await selectBuckets(vault, 120n * S);
+      expect(result).toEqual([
+        { bucket: 200n, amount: 80n * S },
+        { bucket: 300n, amount: 41n * S },
+      ]);
+    });
+
+    it('does not adjust when remaining LPs are at dust threshold', async () => {
+      // Bucket has value and LPs such that remaining LPs = exactly DUST.
+      // value = (DUST + 199*S), lps = (DUST + 199*S). We want 199*S.
+      // Remaining LPs = (DUST + 199*S) - ((DUST + 199*S) * 199*S / (DUST + 199*S)) = DUST.
+      // DUST is not < DUST, so no adjustment.
+      const bucketTotal = DUST + 199n * S;
+      const vault = makeVault(
+        [100n],
+        { '100': bucketTotal },
+        { '100': 1000n },
+        { '100': bucketTotal },
+      );
+
+      const result = await selectBuckets(vault, 199n * S);
+      expect(result).toEqual([{ bucket: 100n, amount: 199n * S }]);
+    });
+
+    it('does not adjust when remaining LPs are well above dust threshold', async () => {
+      const vault = makeVault([100n], { '100': 500n * S }, { '100': 1000n }, { '100': 500n * S });
+
+      const result = await selectBuckets(vault, 200n * S);
+      expect(result).toEqual([{ bucket: 100n, amount: 200n * S }]);
+    });
+
+    it('handles non-1:1 LP-to-value ratio correctly', async () => {
+      // Bucket has 100*S value but 2*S LPs (each LP worth 50 value units).
+      // We want 99*S value. LPs removed = 2*S * 99*S / 100*S = 1_980_000.
+      // Remaining LPs = 2*S - 1_980_000 = 2_000_000 - 1_980_000 = 20_000 < DUST. Take full.
+      const vault = makeVault([100n], { '100': 100n * S }, { '100': 1000n }, { '100': 2n * S });
+
+      const result = await selectBuckets(vault, 99n * S);
+      expect(result).toEqual([{ bucket: 100n, amount: 100n * S }]);
+    });
   });
 });

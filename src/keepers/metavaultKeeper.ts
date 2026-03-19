@@ -234,6 +234,7 @@ async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
         action: 'moveToBuffer',
         from: bucket,
         amount,
+        ark: ark.id,
       });
     }
   }

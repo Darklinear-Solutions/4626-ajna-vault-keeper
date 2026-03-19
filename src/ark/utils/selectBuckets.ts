@@ -10,11 +10,13 @@ export async function selectBuckets(
   amount: bigint,
 ): Promise<BucketMove[]> {
   const buckets = await vault.getBuckets();
+  const dustThreshold = await vault.getDustThreshold();
 
   const bucketData = await Promise.all(
     (buckets as bigint[]).map(async (bucket: bigint) => ({
       bucket,
       value: await vault.lpToValue(bucket),
+      lps: await vault.getBucketLps(bucket),
       price: await vault.getIndexToPrice(bucket),
     })),
   );
@@ -23,12 +25,16 @@ export async function selectBuckets(
   const sufficient = nonEmpty.filter((b) => b.value >= amount);
 
   if (sufficient.length === 1) {
-    return [{ bucket: sufficient[0]!.bucket, amount }];
+    const b = sufficient[0]!;
+    const moveAmount = _wouldLeaveDust(amount, b.value, b.lps, dustThreshold) ? b.value : amount;
+    return [{ bucket: b.bucket, amount: moveAmount }];
   }
 
   if (sufficient.length > 1) {
     sufficient.sort((a, b) => (a.price < b.price ? -1 : a.price > b.price ? 1 : 0));
-    return [{ bucket: sufficient[0]!.bucket, amount }];
+    const b = sufficient[0]!;
+    const moveAmount = _wouldLeaveDust(amount, b.value, b.lps, dustThreshold) ? b.value : amount;
+    return [{ bucket: b.bucket, amount: moveAmount }];
   }
 
   nonEmpty.sort((a, b) => (a.value > b.value ? -1 : a.value < b.value ? 1 : 0));
@@ -38,10 +44,30 @@ export async function selectBuckets(
 
   for (const b of nonEmpty) {
     if (remaining <= 0n) break;
-    const moveAmount = b.value >= remaining ? remaining : b.value;
-    moves.push({ bucket: b.bucket, amount: moveAmount });
-    remaining -= moveAmount;
+
+    if (b.value >= remaining) {
+      const moveAmount = _wouldLeaveDust(remaining, b.value, b.lps, dustThreshold)
+        ? b.value
+        : remaining;
+      moves.push({ bucket: b.bucket, amount: moveAmount });
+      remaining -= moveAmount;
+    } else {
+      moves.push({ bucket: b.bucket, amount: b.value });
+      remaining -= b.value;
+    }
   }
 
   return moves;
+}
+
+function _wouldLeaveDust(
+  amount: bigint,
+  bucketValue: bigint,
+  bucketLps: bigint,
+  dustThreshold: bigint,
+): boolean {
+  if (amount >= bucketValue) return false;
+  const lpsRemoved = (bucketLps * amount) / bucketValue;
+  const remainingLps = bucketLps - lpsRemoved;
+  return remainingLps > 0n && remainingLps < dustThreshold;
 }
