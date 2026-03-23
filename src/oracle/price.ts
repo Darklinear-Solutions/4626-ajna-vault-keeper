@@ -1,5 +1,5 @@
 import { log } from '../utils/logger.ts';
-import { env } from '../utils/env.ts';
+import { config } from '../utils/config.ts';
 import { toAsset } from '../utils/decimalConversion.ts';
 import { getOffchainPrice } from './offchain.ts';
 import { getOnchainPrice } from './onchain.ts';
@@ -12,10 +12,11 @@ const SOURCES: Record<'onchain' | 'offchain', PriceSource> = {
 };
 
 export async function getPrice(assetDecimals: number): Promise<bigint> {
-  if (env.FIXED_PRICE && env.FIXED_PRICE > 0) return getFixedPrice(env.FIXED_PRICE, assetDecimals);
+  if (config.oracle.fixedPrice && config.oracle.fixedPrice > 0)
+    return getFixedPrice(config.oracle.fixedPrice, assetDecimals);
 
   const errors: Error[] = [];
-  const order: ('onchain' | 'offchain')[] = env.ONCHAIN_ORACLE_PRIMARY
+  const order: ('onchain' | 'offchain')[] = config.oracle.onchainPrimary
     ? ['onchain', 'offchain']
     : ['offchain', 'onchain'];
 

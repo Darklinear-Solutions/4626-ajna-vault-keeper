@@ -1,4 +1,5 @@
 import { env } from '../utils/env';
+import { config } from '../utils/config';
 
 type OffchainPriceResponse = Record<string, { [currency: string]: number }>;
 
@@ -12,9 +13,9 @@ const headers: Record<string, string> = {
 };
 
 export async function getOffchainPrice(): Promise<number> {
-  const address = env.QUOTE_TOKEN_ADDRESS;
+  const address = config.quoteTokenAddress;
 
-  const res = await fetch(env.ORACLE_API_URL as string, { method: 'GET', headers });
+  const res = await fetch(config.oracle.apiUrl as string, { method: 'GET', headers });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = (await res.json()) as OffchainPriceResponse;

@@ -1,4 +1,4 @@
-import { env } from '../utils/env';
+import { config } from '../utils/config';
 import { log } from '../utils/logger';
 import { toWad } from '../utils/decimalConversion';
 import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
@@ -109,13 +109,13 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
   const difference = data.bufferTotal - data.bufferTarget;
   const abs = difference >= 0n ? difference : -difference;
 
-  if (abs <= env.BUFFER_PADDING + data.minAmount) return;
+  if (abs <= config.bufferPadding + data.minAmount) return;
 
   if (difference > 0n) {
-    const amount = difference - env.BUFFER_PADDING;
+    const amount = difference - config.bufferPadding;
     await moveExcessFromBuffer(amount, data.optimalBucket);
   } else {
-    const amount = await poolBalanceCap(-difference - env.BUFFER_PADDING, vault);
+    const amount = await poolBalanceCap(-difference - config.bufferPadding, vault);
     await fillBufferDeficit(amount, data);
   }
 }
@@ -251,7 +251,7 @@ async function shouldSkipBucket(
 ): Promise<boolean> {
   if (amountToMove <= 0n) return true;
   if (bucket === data.optimalBucket) return true;
-  if (amountToMove < env.MIN_MOVE_AMOUNT) return true;
+  if (amountToMove < config.minMoveAmount) return true;
 
   const bucketPrice = await vault.getIndexToPrice(bucket);
   return await isBucketInRange(bucketPrice, data);
@@ -289,11 +289,11 @@ async function isOptimalBucketDusty(data: KeeperRunData): Promise<boolean> {
 async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boolean> {
   const bankruptcyTimestamp = await vault.getBankruptcyTime(data.optimalBucket);
 
-  if (env.MIN_TIME_SINCE_BANKRUPTCY === 0n) return bankruptcyTimestamp > 0n;
+  if (config.minTimeSinceBankruptcy === 0n) return bankruptcyTimestamp > 0n;
 
   return (
     bankruptcyTimestamp > 0n &&
-    BigInt(Math.floor(Date.now() / 1000)) - bankruptcyTimestamp < env.MIN_TIME_SINCE_BANKRUPTCY
+    BigInt(Math.floor(Date.now() / 1000)) - bankruptcyTimestamp < config.minTimeSinceBankruptcy
   );
 }
 
@@ -342,13 +342,13 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
     htp: { price: htp, index: htpIndex },
     price: BigInt(price),
     optimalBucket,
-    minAmount: env.MIN_MOVE_AMOUNT,
+    minAmount: config.minMoveAmount,
   };
 }
 
 export async function _calculateOptimalBucket(price: bigint): Promise<bigint> {
   const currentPriceIndex = await vault.getPriceToIndex(price);
-  return currentPriceIndex + env.OPTIMAL_BUCKET_DIFF;
+  return currentPriceIndex + config.optimalBucketDiff;
 }
 
 export async function _calculateBufferTarget(): Promise<bigint> {
@@ -366,7 +366,7 @@ async function _calculateBufferDeficit(data: KeeperRunData): Promise<bigint> {
   const deficit = data.bufferTarget - data.bufferTotal;
   if (data.bufferTotal >= data.bufferTarget) return 0n;
 
-  return deficit > env.BUFFER_PADDING ? deficit - env.BUFFER_PADDING : 0n;
+  return deficit > config.bufferPadding ? deficit - config.bufferPadding : 0n;
 }
 
 async function _refreshBufferValues(data: KeeperRunData) {

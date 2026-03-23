@@ -1,4 +1,5 @@
 import { contract } from '../../src/utils/contract';
+import { config } from '../../src/utils/config';
 import { createVault } from '../../src/ark/vault';
 import type { Address } from 'viem';
 
@@ -10,7 +11,7 @@ const vault = contract('vault');
 
 function getVaultAddr(): Address {
   return (
-    process.env.USE_MOCKS === 'true' ? process.env.MOCK_VAULT_ADDRESS : process.env.VAULT_ADDRESS
+    process.env.USE_MOCKS === 'true' ? process.env.MOCK_VAULT_ADDRESS : config.vaultAddress
   ) as Address;
 }
 

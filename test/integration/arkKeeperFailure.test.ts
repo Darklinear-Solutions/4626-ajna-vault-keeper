@@ -15,7 +15,7 @@ import {
 import { createVault } from '../../src/ark/vault';
 import { run } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
-import { env } from '../../src/utils/env';
+import { config } from '../../src/utils/config';
 import { request } from 'graphql-request';
 import type { Address } from 'viem';
 
@@ -47,7 +47,7 @@ describe('keeper run failure', () => {
   });
 
   it('skips run if optimal bucket is out of range', async () => {
-    env.OPTIMAL_BUCKET_DIFF = 15n;
+    config.optimalBucketDiff = 15n;
     await run(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
@@ -59,7 +59,7 @@ describe('keeper run failure', () => {
       expect(balance).toBe(100000000000000000000n);
     }
 
-    env.OPTIMAL_BUCKET_DIFF = 1n;
+    config.optimalBucketDiff = 1n;
   });
 
   it('skips run if optimal bucket is dusty', async () => {

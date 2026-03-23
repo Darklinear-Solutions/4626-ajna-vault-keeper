@@ -2,6 +2,7 @@ import { createWalletClient, createPublicClient, http, publicActions, type Chain
 import * as allChains from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
 import { env } from './env';
+import { config } from './config';
 import { log } from './logger';
 
 const account = privateKeyToAccount(env.PRIVATE_KEY as `0x${string}`);
@@ -30,7 +31,7 @@ function getChain(chainId: number): Chain {
   } as Chain;
 }
 
-const targetChain = getChain(env.CHAIN_ID);
+const targetChain = getChain(config.chainId);
 
 export const client = createWalletClient({
   account: account,

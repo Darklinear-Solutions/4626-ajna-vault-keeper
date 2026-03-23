@@ -172,7 +172,7 @@ describe('metavault keeper run', () => {
       address: quoteTokenAddress,
       abi: erc20ApproveAbi,
       functionName: 'approve',
-      args: [process.env.METAVAULT_ADDRESS as Address, depositAmount],
+      args: [config.metavaultAddress as Address, depositAmount],
     });
     await metavault().write.deposit([depositAmount, client.account.address]);
 

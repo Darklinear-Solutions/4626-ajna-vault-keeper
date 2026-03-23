@@ -1,11 +1,11 @@
-import { env } from './env';
+import { config } from './config';
 import { log } from './logger';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export function startScheduler(run: () => Promise<void> | void) {
-  const interval = env.KEEPER_INTERVAL_MS;
+  const interval = config.keeper.intervalMs;
 
   const ac = new AbortController();
   const { signal } = ac;

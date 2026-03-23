@@ -12,7 +12,6 @@ import { log } from '../utils/logger';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction';
 import { selectBuckets } from '../ark/utils/selectBuckets';
 import { type Address, maxUint256 } from 'viem';
-import { env } from '../utils/env';
 
 // ============= Types =============
 
@@ -165,7 +164,7 @@ function _fillBuffer(
     if (available <= 0n) continue;
 
     const deduction = available < deficit ? available : deficit;
-    if (deduction < env.MIN_MOVE_AMOUNT) continue;
+    if (deduction < config.minMoveAmount) continue;
     ark.assets -= deduction;
     buffer.assets += deduction;
     deficit -= deduction;
@@ -190,7 +189,7 @@ function _drainBuffer(
     if (capacity <= 0n) continue;
 
     const addition = capacity < excess ? capacity : excess;
-    if (addition < env.MIN_MOVE_AMOUNT) continue;
+    if (addition < config.minMoveAmount) continue;
     ark.assets += addition;
     buffer.assets -= addition;
     excess -= addition;
@@ -229,7 +228,7 @@ export function _reallocateForRates(
       if (capacity <= 0n) continue;
 
       const moveAmount = available < capacity ? available : capacity;
-      if (moveAmount < env.MIN_MOVE_AMOUNT) continue;
+      if (moveAmount < config.minMoveAmount) continue;
       ark.assets -= moveAmount;
       target.assets += moveAmount;
       available -= moveAmount;

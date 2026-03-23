@@ -2,15 +2,13 @@ import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
 import { createVault } from '../../src/ark/vault';
 import { handleTransaction, getGasWithBuffer } from '../../src/utils/transaction';
 import { client } from '../../src/utils/client.ts';
+import { config } from '../../src/utils/config';
 import { setBufferRatio } from '../helpers/vaultHelpers.ts';
 import type { Address } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const vault = createVault(
-  process.env.VAULT_ADDRESS as Address,
-  process.env.VAULT_AUTH_ADDRESS as Address,
-);
+const vault = createVault(config.vaultAddress as Address, config.vaultAuthAddress as Address);
 
 describe('vault interface', () => {
   it('can query buckets', async () => {

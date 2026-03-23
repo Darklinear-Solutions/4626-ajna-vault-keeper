@@ -1,5 +1,5 @@
 import { client } from '../../utils/client';
-import { env } from '../../utils/env';
+import { config } from '../../utils/config';
 import { erc20Abi, type Address } from 'viem';
 
 type VaultLike = { getPoolAddress: () => Promise<Address> };
@@ -7,7 +7,7 @@ type VaultLike = { getPoolAddress: () => Promise<Address> };
 async function getPoolBalance(vault: VaultLike) {
   const poolAddress = await vault.getPoolAddress();
   return client.readContract({
-    address: env.QUOTE_TOKEN_ADDRESS as Address,
+    address: config.quoteTokenAddress as Address,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: [poolAddress],

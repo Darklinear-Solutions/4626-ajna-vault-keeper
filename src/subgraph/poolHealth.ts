@@ -1,5 +1,6 @@
 import { gql, request } from 'graphql-request';
 import { env } from '../utils/env';
+import { config } from '../utils/config';
 import { log } from '../utils/logger';
 import type { Address } from 'viem';
 
@@ -61,13 +62,13 @@ export async function _getUnsettledAuctions(
       'subgraph query failed',
     );
 
-    return env.EXIT_ON_SUBGRAPH_FAILURE ? 'error' : { liquidationAuctions: [] };
+    return config.keeper.exitOnSubgraphFailure ? 'error' : { liquidationAuctions: [] };
   }
 }
 
 export function _filterAuctions(response: GetUnsettledAuctionsResponse): LiquidationAuction[] {
   const unsettledAuctions = response.liquidationAuctions;
-  const maxAge = env.MAX_AUCTION_AGE;
+  const maxAge = config.pool.maxAuctionAge;
 
   if (maxAge === 0) return unsettledAuctions;
 

@@ -14,16 +14,23 @@ import { type createVault } from '../../src/ark/vault';
 import { type Address, maxUint256 } from 'viem';
 
 vi.mock('../../src/utils/config', () => ({
-  config: { minRateDiff: 10 },
+  config: {
+    minRateDiff: 10,
+    minMoveAmount: 1_000_001n,
+    keeper: { logLevel: 'warn', haltIfLupBelowHtp: true, exitOnSubgraphFailure: false },
+    oracle: {
+      onchainPrimary: false,
+      onchainMaxStaleness: null,
+      fixedPrice: null,
+      futureSkewTolerance: 120,
+    },
+    pool: { optimalBucketDiff: 1, maxAuctionAge: 259200 },
+    transaction: { confirmations: 1 },
+    defaultGas: 3_000_000n,
+    gasBuffer: 50n,
+    chainId: 1,
+  },
 }));
-
-vi.mock('../../src/utils/env', async (importOriginal) => {
-  const original = (await importOriginal()) as Record<string, unknown>;
-  return {
-    ...original,
-    env: { ...(original.env as Record<string, unknown>), MIN_MOVE_AMOUNT: 1_000_001n },
-  };
-});
 
 const ADDR_A = '0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa' as Address;
 const ADDR_B = '0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB' as Address;
