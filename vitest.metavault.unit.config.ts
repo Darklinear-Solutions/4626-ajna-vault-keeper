@@ -5,7 +5,7 @@ export default mergeConfig(
   base,
   defineConfig({
     test: {
-      include: ['test/metavault/**/*.{test,spec}.{ts,tsx,js}', 'test/keepers/metavaultKeeper.test.ts'],
+      include: ['test/metavault/**/*.{test,spec}.{ts,tsx,js}', 'test/keepers/metavaultKeeper.test.ts', 'test/ark/utils/selectBuckets.test.ts'],
       exclude: ['node_modules/**', 'dist/**'],
     },
   }),

@@ -192,6 +192,7 @@ export async function getGasWithBuffer(
   try {
     const fees = await client.estimateFeesPerGas();
     const estimated = await client.estimateContractGas({
+      account: client.account,
       address: resolvedAddress,
       abi,
       functionName,
