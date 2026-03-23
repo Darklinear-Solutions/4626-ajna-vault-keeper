@@ -30,7 +30,7 @@
   },
 
   "transaction": {
-    "gasBuffer": 50,
+    "gasBuffer": 100,
     "defaultGas": 3000000,
     "confirmations": 1
   },

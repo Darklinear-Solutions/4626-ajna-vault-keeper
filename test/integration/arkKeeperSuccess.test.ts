@@ -4,6 +4,7 @@ import { getPrice } from '../../src/oracle/price';
 import { createVault } from '../../src/ark/vault';
 import { run } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
+import { config } from '../../src/utils/config';
 import type { Address } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -86,7 +87,7 @@ describe('keeper run success', () => {
     expect(optimalBucketBalanceAfter - optimalBucketBalanceBefore).toBe(expectedMoveAmount);
 
     // Assert that minimum move balance is respected
-    expect(dustyBucketBefore).toBeLessThan(BigInt(process.env.MIN_MOVE_AMOUNT!));
+    expect(dustyBucketBefore).toBeLessThan(config.minMoveAmount);
     expect(dustyBucketBefore).toBe(dustyBucketAfter);
   });
 
