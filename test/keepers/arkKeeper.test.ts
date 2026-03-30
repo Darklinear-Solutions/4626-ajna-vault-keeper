@@ -6,7 +6,7 @@ import {
 } from '../../src/keepers/arkKeeper';
 import { getPrice } from '../../src/oracle/price';
 import { createVault } from '../../src/ark/vault';
-import { config } from '../../src/utils/config';
+import { config, resolveArkSettings } from '../../src/utils/config';
 
 const vault = createVault(config.arks[0]!.vaultAddress, config.arks[0]!.vaultAuthAddress);
 
@@ -15,7 +15,7 @@ describe('keeper calculations', () => {
     initArkKeeper(
       config.arks[0]!.vaultAddress,
       config.arks[0]!.vaultAuthAddress,
-      BigInt(config.pool.optimalBucketDiff),
+      resolveArkSettings(config.arks[0]!),
     );
   });
 

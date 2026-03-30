@@ -13,6 +13,10 @@ type ArkConfig = {
     max: number;
   };
   optimalBucketDiff?: number;
+  bufferPadding?: string;
+  minMoveAmount?: string;
+  minTimeSinceBankruptcy?: number;
+  maxAuctionAge?: number;
 };
 
 type RawConfig = {
@@ -36,8 +40,8 @@ type RawConfig = {
     futureSkewTolerance?: number;
   };
 
-  pool: {
-    optimalBucketDiff: number;
+  arkGlobal: {
+    optimalBucketDiff?: number;
     bufferPadding?: string;
     minMoveAmount?: string;
     minTimeSinceBankruptcy?: number;
@@ -93,32 +97,60 @@ if (raw.oracle.onchainPrimary && !raw.oracle.onchainAddress) {
 
 raw.keeper.exitOnSubgraphFailure ??= false;
 raw.oracle.futureSkewTolerance ??= 120;
-raw.pool.bufferPadding ??= '100000000000000';
-raw.pool.minMoveAmount ??= '1000001';
-raw.pool.minTimeSinceBankruptcy ??= 259200;
-raw.pool.maxAuctionAge ??= 259200;
+raw.arkGlobal.bufferPadding ??= '100000000000000';
+raw.arkGlobal.minMoveAmount ??= '1000001';
+raw.arkGlobal.minTimeSinceBankruptcy ??= 259200;
+raw.arkGlobal.maxAuctionAge ??= 259200;
 raw.transaction.gasBuffer =
   !raw.transaction.gasBuffer || BigInt(raw.transaction.gasBuffer) === 0n
     ? 50
     : raw.transaction.gasBuffer;
 raw.transaction.defaultGas ??= 5000000;
 
+if (!raw.arkGlobal.optimalBucketDiff) {
+  const missing = raw.arks
+    .map((ark, i) => (ark.optimalBucketDiff == null ? i : null))
+    .filter((i) => i !== null);
+  if (missing.length > 0) {
+    throw new Error(
+      `config.json: optimalBucketDiff must be set globally in arkGlobal or individually for every ark (missing on arks: ${missing.join(', ')})`,
+    );
+  }
+}
+
 if (!raw.minRateDiff) raw.minRateDiff = 10;
 if (!raw.quoteTokenAddress) throw new Error('config.json: quoteTokenAddress is required');
 
 // ============= Export =============
 
+export type ResolvedArkSettings = {
+  optimalBucketDiff: bigint;
+  bufferPadding: bigint;
+  minMoveAmount: bigint;
+  minTimeSinceBankruptcy: bigint;
+  maxAuctionAge: number;
+};
+
+export function resolveArkSettings(ark: ArkConfig): ResolvedArkSettings {
+  return {
+    optimalBucketDiff: BigInt(ark.optimalBucketDiff ?? raw.arkGlobal.optimalBucketDiff!),
+    bufferPadding: BigInt(ark.bufferPadding ?? raw.arkGlobal.bufferPadding!),
+    minMoveAmount: BigInt(ark.minMoveAmount ?? raw.arkGlobal.minMoveAmount!),
+    minTimeSinceBankruptcy: BigInt(
+      ark.minTimeSinceBankruptcy ?? raw.arkGlobal.minTimeSinceBankruptcy!,
+    ),
+    maxAuctionAge: ark.maxAuctionAge ?? raw.arkGlobal.maxAuctionAge!,
+  };
+}
+
 export const config = {
   ...raw,
   keeper: raw.keeper as Required<RawConfig['keeper']>,
   oracle: raw.oracle as Required<RawConfig['oracle']>,
-  pool: raw.pool as Required<RawConfig['pool']>,
+  arkGlobal: raw.arkGlobal as Required<RawConfig['arkGlobal']>,
   transaction: raw.transaction as Required<RawConfig['transaction']>,
   quoteTokenAddress: raw.quoteTokenAddress.toLowerCase() as Address,
   metavaultAddress: (raw.metavaultAddress || undefined) as Address | undefined,
-  bufferPadding: BigInt(raw.pool.bufferPadding!),
-  minMoveAmount: BigInt(raw.pool.minMoveAmount!),
-  minTimeSinceBankruptcy: BigInt(raw.pool.minTimeSinceBankruptcy!),
   defaultGas: BigInt(raw.transaction.defaultGas!),
   gasBuffer: BigInt(raw.transaction.gasBuffer!),
 };

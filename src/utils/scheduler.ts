@@ -1,4 +1,4 @@
-import { config } from './config';
+import { config, resolveArkSettings } from './config';
 import { log } from './logger';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { metavaultRun } from '../keepers/metavaultKeeper';
@@ -10,8 +10,8 @@ async function run() {
   await metavaultRun();
 
   for (const ark of config.arks) {
-    const optimalBucketDiff = BigInt(ark.optimalBucketDiff ?? config.pool.optimalBucketDiff);
-    await arkRun(ark.vaultAddress, ark.vaultAuthAddress, optimalBucketDiff);
+    const settings = resolveArkSettings(ark);
+    await arkRun(ark.vaultAddress, ark.vaultAuthAddress, settings);
   }
 }
 

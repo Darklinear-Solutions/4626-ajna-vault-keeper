@@ -1,4 +1,4 @@
-import { config } from '../utils/config';
+import { type ResolvedArkSettings } from '../utils/config';
 import { log } from '../utils/logger';
 import { toWad } from '../utils/decimalConversion';
 import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
@@ -10,7 +10,7 @@ import { type Address } from 'viem';
 
 let halted = false;
 let vault: ReturnType<typeof createVault>;
-let _optimalBucketDiff: bigint;
+let _settings: ResolvedArkSettings;
 
 // ============= Types =============
 
@@ -42,14 +42,14 @@ type MoveOperation = {
 export async function arkRun(
   address: Address,
   vaultAuthAddress: Address,
-  optimalBucketDiff: bigint,
+  settings: ResolvedArkSettings,
 ) {
   vault = createVault(address, vaultAuthAddress);
-  _optimalBucketDiff = optimalBucketDiff;
+  _settings = settings;
 
   if (halted) return logRunExit('keeper halted');
   if (await vault.isPaused()) return logRunExit('vault is currently paused');
-  if (await poolHasBadDebt(vault)) return logRunExit('pool has bad debt');
+  if (await poolHasBadDebt(vault, _settings.maxAuctionAge)) return logRunExit('pool has bad debt');
 
   const gas = await getGasWithBuffer('pool', 'updateInterest', [], await vault.getPoolAddress());
   await handleTransaction(vault.updateInterest(gas), {
@@ -115,13 +115,13 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
   const difference = data.bufferTotal - data.bufferTarget;
   const abs = difference >= 0n ? difference : -difference;
 
-  if (abs <= config.bufferPadding + data.minAmount) return;
+  if (abs <= _settings.bufferPadding + data.minAmount) return;
 
   if (difference > 0n) {
-    const amount = difference - config.bufferPadding;
+    const amount = difference - _settings.bufferPadding;
     await moveExcessFromBuffer(amount, data.optimalBucket);
   } else {
-    const amount = await poolBalanceCap(-difference - config.bufferPadding, vault);
+    const amount = await poolBalanceCap(-difference - _settings.bufferPadding, vault);
     await fillBufferDeficit(amount, data);
   }
 }
@@ -282,7 +282,7 @@ async function shouldSkipBucket(
 ): Promise<boolean> {
   if (amountToMove <= 0n) return true;
   if (bucket === data.optimalBucket) return true;
-  if (amountToMove < config.minMoveAmount) return true;
+  if (amountToMove < _settings.minMoveAmount) return true;
 
   const bucketPrice = await vault.getIndexToPrice(bucket);
   return await isBucketInRange(bucketPrice, data);
@@ -320,11 +320,11 @@ async function isOptimalBucketDusty(data: KeeperRunData): Promise<boolean> {
 async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boolean> {
   const bankruptcyTimestamp = await vault.getBankruptcyTime(data.optimalBucket);
 
-  if (config.minTimeSinceBankruptcy === 0n) return bankruptcyTimestamp > 0n;
+  if (_settings.minTimeSinceBankruptcy === 0n) return bankruptcyTimestamp > 0n;
 
   return (
     bankruptcyTimestamp > 0n &&
-    BigInt(Math.floor(Date.now() / 1000)) - bankruptcyTimestamp < config.minTimeSinceBankruptcy
+    BigInt(Math.floor(Date.now() / 1000)) - bankruptcyTimestamp < _settings.minTimeSinceBankruptcy
   );
 }
 
@@ -373,13 +373,13 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
     htp: { price: htp, index: htpIndex },
     price: BigInt(price),
     optimalBucket,
-    minAmount: config.minMoveAmount,
+    minAmount: _settings.minMoveAmount,
   };
 }
 
 export async function _calculateOptimalBucket(price: bigint): Promise<bigint> {
   const currentPriceIndex = await vault.getPriceToIndex(price);
-  return currentPriceIndex + _optimalBucketDiff;
+  return currentPriceIndex + _settings.optimalBucketDiff;
 }
 
 export async function _calculateBufferTarget(): Promise<bigint> {
@@ -397,7 +397,7 @@ async function _calculateBufferDeficit(data: KeeperRunData): Promise<bigint> {
   const deficit = data.bufferTarget - data.bufferTotal;
   if (data.bufferTotal >= data.bufferTarget) return 0n;
 
-  return deficit > config.bufferPadding ? deficit - config.bufferPadding : 0n;
+  return deficit > _settings.bufferPadding ? deficit - _settings.bufferPadding : 0n;
 }
 
 async function _refreshBufferValues(data: KeeperRunData) {
@@ -412,10 +412,10 @@ async function _refreshBufferValues(data: KeeperRunData) {
 export function initArkKeeper(
   address: Address,
   vaultAuthAddress: Address,
-  optimalBucketDiff: bigint,
+  settings: ResolvedArkSettings,
 ) {
   vault = createVault(address, vaultAuthAddress);
-  _optimalBucketDiff = optimalBucketDiff;
+  _settings = settings;
 }
 
 export function haltKeeper() {

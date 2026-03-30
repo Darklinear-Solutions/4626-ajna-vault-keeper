@@ -16,7 +16,6 @@ import { type Address, maxUint256 } from 'viem';
 vi.mock('../../src/utils/config', () => ({
   config: {
     minRateDiff: 10,
-    minMoveAmount: 1_000_001n,
     keeper: { logLevel: 'warn', haltIfLupBelowHtp: true, exitOnSubgraphFailure: false },
     oracle: {
       onchainPrimary: false,
@@ -24,12 +23,19 @@ vi.mock('../../src/utils/config', () => ({
       fixedPrice: null,
       futureSkewTolerance: 120,
     },
-    pool: { optimalBucketDiff: 1, maxAuctionAge: 259200 },
+    arkGlobal: { optimalBucketDiff: 1, maxAuctionAge: 259200, minMoveAmount: '1000001' },
     transaction: { confirmations: 1 },
     defaultGas: 3_000_000n,
     gasBuffer: 50n,
     chainId: 1,
   },
+  resolveArkSettings: () => ({
+    optimalBucketDiff: 1n,
+    bufferPadding: 100000000000000n,
+    minMoveAmount: 1_000_001n,
+    minTimeSinceBankruptcy: 259200n,
+    maxAuctionAge: 259200,
+  }),
 }));
 
 const ADDR_A = '0xaAaAaAaaAaAaAaaAaAAAAAAAAaaaAaAaAaaAaaAa' as Address;
@@ -51,6 +57,7 @@ function makeArk(overrides: Partial<ArkAllocation> & { id: Address }): ArkAlloca
     min: 5,
     max: 20,
     rate: 100n,
+    minMoveAmount: 1_000_001n,
     ...overrides,
   };
 }

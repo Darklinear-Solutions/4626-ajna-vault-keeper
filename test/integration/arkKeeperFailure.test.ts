@@ -15,8 +15,11 @@ import {
 import { createVault } from '../../src/ark/vault';
 import { arkRun } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
+import { config, resolveArkSettings } from '../../src/utils/config';
 import { request } from 'graphql-request';
 import type { Address } from 'viem';
+
+const testSettings = resolveArkSettings(config.arks[0]!);
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 describe('keeper run failure', () => {
@@ -49,7 +52,7 @@ describe('keeper run failure', () => {
     await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
-      15n,
+      { ...testSettings, optimalBucketDiff: 15n },
     );
 
     const buckets = await vault.getBuckets();
@@ -64,7 +67,7 @@ describe('keeper run failure', () => {
     await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
-      1n,
+      testSettings,
     );
 
     const buckets = await vault.getBuckets();
@@ -86,7 +89,7 @@ describe('keeper run failure', () => {
     await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
-      1n,
+      testSettings,
     );
 
     const buckets = await vault.getBuckets();
@@ -103,7 +106,7 @@ describe('keeper run failure', () => {
     await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
-      1n,
+      testSettings,
     );
 
     const buckets = await vault.getBuckets();

@@ -19,10 +19,13 @@ type VaultLike = {
   getAuctionStatus: (borrower: Address) => Promise<readonly [bigint, bigint, bigint, ...unknown[]]>;
 };
 
-export async function poolHasBadDebt(vault: VaultLike): Promise<boolean> {
+export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): Promise<boolean> {
   const unfilteredAuctions = await _getUnsettledAuctions(vault);
   if (unfilteredAuctions === 'error') return true;
-  const auctionsBeforeCutoff = _filterAuctions(unfilteredAuctions as GetUnsettledAuctionsResponse);
+  const auctionsBeforeCutoff = _filterAuctions(
+    unfilteredAuctions as GetUnsettledAuctionsResponse,
+    maxAuctionAge,
+  );
 
   for (let i = 0; i < auctionsBeforeCutoff.length; i++) {
     const [kickTime, collateralRemaining, debtRemaining] = await vault.getAuctionStatus(
@@ -66,9 +69,12 @@ export async function _getUnsettledAuctions(
   }
 }
 
-export function _filterAuctions(response: GetUnsettledAuctionsResponse): LiquidationAuction[] {
+export function _filterAuctions(
+  response: GetUnsettledAuctionsResponse,
+  maxAuctionAge?: number,
+): LiquidationAuction[] {
   const unsettledAuctions = response.liquidationAuctions;
-  const maxAge = config.pool.maxAuctionAge;
+  const maxAge = maxAuctionAge ?? config.arkGlobal.maxAuctionAge;
 
   if (maxAge === 0) return unsettledAuctions;
 

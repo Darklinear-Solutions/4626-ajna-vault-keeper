@@ -19,17 +19,17 @@
     "futureSkewTolerance": 120
   },
 
-  "pool": {
+  "arkGlobal": {
     "optimalBucketDiff": 1,
     "bufferPadding": "100000000000000",
-    "minMoveAmount": "1000000",
+    "minMoveAmount": "1000001",
     "minTimeSinceBankruptcy": 259200,
     "maxAuctionAge": 259200
   },
 
   "transaction": {
     "gasBuffer": 100,
-    "defaultGas": 3000000,
+    "defaultGas": 5000000,
     "confirmations": 1
   },
 
