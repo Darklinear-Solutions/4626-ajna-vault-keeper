@@ -4,8 +4,6 @@ import { config } from './config';
 type StaticTuple = readonly [string | undefined, string | undefined];
 
 export const contracts = {
-  vault: [config.vaultAddress, process.env.MOCK_VAULT_ADDRESS] as StaticTuple,
-  vaultAuth: [config.vaultAuthAddress, process.env.MOCK_VAULT_AUTH_ADDRESS] as StaticTuple,
   chronicle: [config.oracle.onchainAddress, process.env.MOCK_CHRONICLE_ADDRESS] as StaticTuple,
   metavault: [config.metavaultAddress, config.metavaultAddress] as StaticTuple,
 } as const;

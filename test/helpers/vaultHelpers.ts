@@ -5,23 +5,31 @@ import type { Address } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const vaultAuth = contract('vaultAuth');
-const chronicle = contract('chronicle');
-const vault = contract('vault');
-
 function getVaultAddr(): Address {
   return (
-    process.env.USE_MOCKS === 'true' ? process.env.MOCK_VAULT_ADDRESS : config.vaultAddress
+    process.env.USE_MOCKS === 'true' ? process.env.MOCK_VAULT_ADDRESS : config.arks[0]!.vaultAddress
   ) as Address;
 }
 
+function getVaultAuthAddr(): Address {
+  return (
+    process.env.USE_MOCKS === 'true'
+      ? process.env.MOCK_VAULT_AUTH_ADDRESS
+      : config.arks[0]!.vaultAuthAddress
+  ) as Address;
+}
+
+const vaultAuth = () => contract('vaultAuth', getVaultAuthAddr())();
+const chronicle = contract('chronicle');
+const vault = () => contract('vault', getVaultAddr())();
+
 const getPool = async () => {
-  const poolAddr = await createVault(getVaultAddr()).getPoolAddress();
+  const poolAddr = await createVault(getVaultAddr(), getVaultAuthAddr()).getPoolAddress();
   return contract('pool', poolAddr)();
 };
 
 const getPoolInfoUtils = async () => {
-  const v = createVault(getVaultAddr());
+  const v = createVault(getVaultAddr(), getVaultAuthAddr());
   const addr = (await v.getPoolInfoUtilsAddress()) as Address;
   return contract('poolInfoUtils', addr)();
 };

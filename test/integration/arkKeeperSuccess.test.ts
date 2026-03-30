@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { setBufferRatio, setMockState, useMocks } from '../helpers/vaultHelpers';
 import { getPrice } from '../../src/oracle/price';
 import { createVault } from '../../src/ark/vault';
-import { run } from '../../src/keepers/arkKeeper';
+import { arkRun } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
 import { config } from '../../src/utils/config';
 import type { Address } from 'viem';
@@ -58,9 +58,10 @@ describe('keeper run success', () => {
     const optimalBucketBalanceBefore = await vault.lpToValue(4157n);
     const dustyBucketBefore = await vault.lpToValue(4149n);
 
-    await run(
+    await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+      1n,
     );
 
     const optimalBucketBalanceAfter = await vault.lpToValue(4157n);
@@ -96,9 +97,10 @@ describe('keeper run success', () => {
     const bufferTotalBefore = await vault.getBufferTotal();
     const optimalBucketBalanceBefore = await vault.lpToValue(4157n);
 
-    await run(
+    await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+      1n,
     );
 
     const bufferTotalAfter = await vault.getBufferTotal();

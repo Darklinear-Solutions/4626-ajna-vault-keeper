@@ -97,8 +97,10 @@ async function deployContracts(): Promise<void> {
       const testConfig = JSON.parse(
         fs.readFileSync(path.join(process.cwd(), 'config.test.json'), 'utf-8'),
       );
-      testConfig.vaultAddress = addresses.VAULT_ADDRESS;
-      testConfig.vaultAuthAddress = addresses.VAULT_AUTH_ADDRESS;
+      for (const ark of testConfig.arks) {
+        ark.vaultAddress = addresses.VAULT_ADDRESS;
+        ark.vaultAuthAddress = addresses.VAULT_AUTH_ADDRESS;
+      }
       fs.writeFileSync(
         path.join(process.cwd(), 'config.json'),
         JSON.stringify(testConfig, null, 2),

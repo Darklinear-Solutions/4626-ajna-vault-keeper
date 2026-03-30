@@ -4,11 +4,11 @@ import { handleTransaction, getGasWithBuffer } from '../../src/utils/transaction
 import { client } from '../../src/utils/client.ts';
 import { config } from '../../src/utils/config';
 import { setBufferRatio } from '../helpers/vaultHelpers.ts';
-import type { Address } from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const vault = createVault(config.vaultAddress as Address, config.vaultAuthAddress as Address);
+const vaultAddress = config.arks[0]!.vaultAddress;
+const vault = createVault(vaultAddress, config.arks[0]!.vaultAuthAddress);
 
 describe('vault interface', () => {
   it('can query buckets', async () => {
@@ -66,7 +66,7 @@ describe('vault operations', () => {
       vault.getBufferTotal(),
       vault.lpToValue(htpIndex),
     ]);
-    const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [htpIndex, assets]);
+    const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [htpIndex, assets], vaultAddress);
 
     await handleTransaction(vault.moveFromBuffer(htpIndex, assets, gas), {
       action: 'moveFromBuffer',
@@ -96,7 +96,12 @@ describe('vault operations', () => {
     ]);
 
     const toAssets = 19999721737n;
-    const gas = await getGasWithBuffer('vault', 'move', [htpIndex, toIndex, toAssets]);
+    const gas = await getGasWithBuffer(
+      'vault',
+      'move',
+      [htpIndex, toIndex, toAssets],
+      vaultAddress,
+    );
 
     await handleTransaction(vault.move(htpIndex, toIndex, toAssets, gas), {
       action: 'move',
@@ -127,7 +132,7 @@ describe('vault operations', () => {
     ]);
 
     const toAssets = BigInt(1e10);
-    const gas = await getGasWithBuffer('vault', 'moveToBuffer', [htpIndex, toAssets]);
+    const gas = await getGasWithBuffer('vault', 'moveToBuffer', [htpIndex, toAssets], vaultAddress);
 
     await handleTransaction(vault.moveToBuffer(htpIndex, toAssets, gas), {
       action: 'moveToBuffer',

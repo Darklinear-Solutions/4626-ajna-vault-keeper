@@ -1,10 +1,21 @@
 import { config } from './config';
 import { log } from './logger';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { metavaultRun } from '../keepers/metavaultKeeper';
+import { arkRun } from '../keepers/arkKeeper';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export function startScheduler(run: () => Promise<void> | void) {
+async function run() {
+  await metavaultRun();
+
+  for (const ark of config.arks) {
+    const optimalBucketDiff = BigInt(ark.optimalBucketDiff ?? config.pool.optimalBucketDiff);
+    await arkRun(ark.vaultAddress, ark.vaultAuthAddress, optimalBucketDiff);
+  }
+}
+
+export function startScheduler() {
   const interval = config.keeper.intervalMs;
 
   const ac = new AbortController();

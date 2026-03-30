@@ -9,7 +9,8 @@ import { createVault } from '../ark/vault';
 import { type Address } from 'viem';
 
 let halted = false;
-let vault = createVault();
+let vault: ReturnType<typeof createVault>;
+let _optimalBucketDiff: bigint;
 
 // ============= Types =============
 
@@ -38,8 +39,13 @@ type MoveOperation = {
 
 // ============= Main Run Function =============
 
-export async function run(address?: Address, vaultAuthAddress?: Address) {
+export async function arkRun(
+  address: Address,
+  vaultAuthAddress: Address,
+  optimalBucketDiff: bigint,
+) {
   vault = createVault(address, vaultAuthAddress);
+  _optimalBucketDiff = optimalBucketDiff;
 
   if (halted) return logRunExit('keeper halted');
   if (await vault.isPaused()) return logRunExit('vault is currently paused');
@@ -168,7 +174,12 @@ function planBucketOperations(
 async function executeMoveOperation(op: MoveOperation): Promise<TransactionData | undefined> {
   if (halted) return;
   if (op.from === 'Buffer') {
-    const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [op.to, op.amount]);
+    const gas = await getGasWithBuffer(
+      'vault',
+      'moveFromBuffer',
+      [op.to, op.amount],
+      vault.getAddress(),
+    );
     return await handleTransaction(vault.moveFromBuffer(op.to as bigint, op.amount, gas), {
       action: 'moveFromBuffer',
       to: op.to,
@@ -176,7 +187,12 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       ark: vault.getAddress(),
     });
   } else if (op.to === 'Buffer') {
-    const gas = await getGasWithBuffer('vault', 'moveToBuffer', [op.from, op.amount]);
+    const gas = await getGasWithBuffer(
+      'vault',
+      'moveToBuffer',
+      [op.from, op.amount],
+      vault.getAddress(),
+    );
     return await handleTransaction(vault.moveToBuffer(op.from, op.amount, gas), {
       action: 'moveToBuffer',
       from: op.from,
@@ -184,7 +200,12 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       ark: vault.getAddress(),
     });
   } else {
-    const gas = await getGasWithBuffer('vault', 'move', [op.from, op.to, op.amount]);
+    const gas = await getGasWithBuffer(
+      'vault',
+      'move',
+      [op.from, op.to, op.amount],
+      vault.getAddress(),
+    );
     return await handleTransaction(vault.move(op.from, op.to, op.amount, gas), {
       action: 'move',
       from: op.from,
@@ -202,7 +223,12 @@ async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promi
     bucket: targetBucket,
     ark: vault.getAddress(),
   });
-  const gas = await getGasWithBuffer('vault', 'moveFromBuffer', [targetBucket, amount]);
+  const gas = await getGasWithBuffer(
+    'vault',
+    'moveFromBuffer',
+    [targetBucket, amount],
+    vault.getAddress(),
+  );
   await handleTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
     action: 'moveFromBuffer',
     to: targetBucket,
@@ -231,7 +257,12 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       vault,
     );
 
-    const gas = await getGasWithBuffer('vault', 'moveToBuffer', [bucket, amountToMove]);
+    const gas = await getGasWithBuffer(
+      'vault',
+      'moveToBuffer',
+      [bucket, amountToMove],
+      vault.getAddress(),
+    );
     const txData = await handleTransaction(vault.moveToBuffer(bucket, amountToMove, gas), {
       action: 'moveToBuffer',
       from: bucket,
@@ -348,7 +379,7 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
 
 export async function _calculateOptimalBucket(price: bigint): Promise<bigint> {
   const currentPriceIndex = await vault.getPriceToIndex(price);
-  return currentPriceIndex + config.optimalBucketDiff;
+  return currentPriceIndex + _optimalBucketDiff;
 }
 
 export async function _calculateBufferTarget(): Promise<bigint> {
@@ -377,6 +408,15 @@ async function _refreshBufferValues(data: KeeperRunData) {
 }
 
 // ============= Helpers =============
+
+export function initArkKeeper(
+  address: Address,
+  vaultAuthAddress: Address,
+  optimalBucketDiff: bigint,
+) {
+  vault = createVault(address, vaultAuthAddress);
+  _optimalBucketDiff = optimalBucketDiff;
+}
 
 export function haltKeeper() {
   halted = true;

@@ -2,13 +2,12 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { Address } from 'viem';
 
-// TODO: vaultAddress and vaultAuthAddress need to be scoped to ark objects in arks array
-// TODO: optimalBucketDiff needs to be scoped to ark objects but also remain globally; scoped values, if they exist, take precedence for given ark
-
 // ============= Raw JSON Types =============
 
 type ArkConfig = {
   address: Address;
+  vaultAddress: Address;
+  vaultAuthAddress: Address;
   allocation: {
     min: number;
     max: number;
@@ -19,8 +18,6 @@ type ArkConfig = {
 type RawConfig = {
   chainId: number;
   quoteTokenAddress: string;
-  vaultAddress?: string;
-  vaultAuthAddress?: string;
   metavaultAddress?: string;
 
   keeper: {
@@ -84,24 +81,27 @@ if (raw.arks.length > 0 && raw.buffer.allocation > 0) {
 }
 
 if (!raw.oracle.onchainPrimary && !raw.oracle.fixedPrice) {
-  if (!raw.oracle.apiUrl) throw new Error('config.json: oracle.apiUrl is required when onchainPrimary is false and fixedPrice is not set');
+  if (!raw.oracle.apiUrl)
+    throw new Error(
+      'config.json: oracle.apiUrl is required when onchainPrimary is false and fixedPrice is not set',
+    );
 }
 
 if (raw.oracle.onchainPrimary && !raw.oracle.onchainAddress) {
   throw new Error('config.json: oracle.onchainAddress is required when onchainPrimary is true');
 }
 
-// Apply defaults for optional fields
 raw.keeper.exitOnSubgraphFailure ??= false;
 raw.oracle.futureSkewTolerance ??= 120;
 raw.pool.bufferPadding ??= '100000000000000';
 raw.pool.minMoveAmount ??= '1000001';
 raw.pool.minTimeSinceBankruptcy ??= 259200;
 raw.pool.maxAuctionAge ??= 259200;
-raw.transaction.gasBuffer = !raw.transaction.gasBuffer || BigInt(raw.transaction.gasBuffer) === 0n
-  ? 50
-  : raw.transaction.gasBuffer;
-raw.transaction.defaultGas ??= 3000000;
+raw.transaction.gasBuffer =
+  !raw.transaction.gasBuffer || BigInt(raw.transaction.gasBuffer) === 0n
+    ? 50
+    : raw.transaction.gasBuffer;
+raw.transaction.defaultGas ??= 5000000;
 
 if (!raw.minRateDiff) raw.minRateDiff = 10;
 if (!raw.quoteTokenAddress) throw new Error('config.json: quoteTokenAddress is required');
@@ -115,12 +115,9 @@ export const config = {
   pool: raw.pool as Required<RawConfig['pool']>,
   transaction: raw.transaction as Required<RawConfig['transaction']>,
   quoteTokenAddress: raw.quoteTokenAddress.toLowerCase() as Address,
-  vaultAddress: (raw.vaultAddress || undefined) as Address | undefined,
-  vaultAuthAddress: (raw.vaultAuthAddress || undefined) as Address | undefined,
   metavaultAddress: (raw.metavaultAddress || undefined) as Address | undefined,
   bufferPadding: BigInt(raw.pool.bufferPadding!),
   minMoveAmount: BigInt(raw.pool.minMoveAmount!),
-  optimalBucketDiff: BigInt(raw.pool.optimalBucketDiff),
   minTimeSinceBankruptcy: BigInt(raw.pool.minTimeSinceBankruptcy!),
   defaultGas: BigInt(raw.transaction.defaultGas!),
   gasBuffer: BigInt(raw.transaction.gasBuffer!),

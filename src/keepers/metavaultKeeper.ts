@@ -41,7 +41,7 @@ export type BufferAllocation = {
 
 // ============= Main Run Function =============
 
-export async function run() {
+export async function metavaultRun() {
   const pausedArks = await _getPausedArks();
   if (pausedArks.length > 0) {
     return log.info(
