@@ -23,7 +23,8 @@
     "precommit": "pnpm format && pnpm typecheck && pnpm lint && pnpm test",
     "docker:build:local": "docker build --target local -t ajna-erc4626-keeper:local .",
     "docker:run:local": "docker run --rm ajna-erc4626-keeper:local",
-    "docker:build:prod": "docker build -t ajna-erc4626-keeper ."
+    "docker:build:prod": "docker build -t ajna-erc4626-keeper .",
+    "import-key": "tsx scripts/import-key.ts"
   },
   "dependencies": {
     "dotenv": "17.2.1",
