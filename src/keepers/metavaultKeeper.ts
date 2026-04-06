@@ -80,8 +80,7 @@ export async function metavaultRun() {
     );
   }
 
-  const gas = await getGasWithBuffer('metavault', 'reallocate', [allocations]);
-  await handleTransaction(reallocate(allocations, gas), { action: 'reallocate' });
+  await handleTransaction(reallocate(allocations, config.defaultGas), { action: 'reallocate' });
 
   log.info({ event: 'metavault_run_complete', allocations }, 'metavault run complete');
 }
