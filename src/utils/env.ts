@@ -8,75 +8,14 @@ for (const key of REQUIRED) {
   }
 }
 
-if (!process.env.ONCHAIN_ORACLE_PRIMARY && !process.env.FIXED_PRICE) {
-  throw new Error('Oracle API URL must be specified');
-}
-
 if (process.env.ORACLE_API_KEY && !process.env.ORACLE_API_TIER) {
   throw new Error('API key tier must be specified');
 }
 
-if (process.env.ONCHAIN_ORACLE_PRIMARY === 'true' && !process.env.ONCHAIN_ORACLE_ADDRESS) {
-  throw new Error('oracle smart contract address must be specified');
-}
-
-const gasBuffer =
-  !process.env.GAS_BUFFER || BigInt(process.env.GAS_BUFFER) === 0n
-    ? 50n
-    : BigInt(process.env.GAS_BUFFER);
-
-const defaultGas = process.env.DEFAULT_GAS ?? 3000000;
-
-const bufferPadding = process.env.BUFFER_PADDING ?? 100000000000000;
-
-// Assumes LP_DUST = 1e6 + 1, because assetDecimals cannot be queried here.
-// If LP_DUST != 1e6 + 1, MIN_MOVE_AMOUNT should be set as an environment variable.
-const minAmount = process.env.MIN_MOVE_AMOUNT ?? 1000001;
-
-// Defaults to 72 hours (seconds)
-const minTimeSinceBankruptcy = process.env.MIN_TIME_SINCE_BANKRUPTCY ?? 259200;
-
-// Defaults to 72 hours (seconds)
-const maxAuctionAge = process.env.MAX_AUCTION_AGE ?? 259200;
-
-// Defaults to 2 minutes (seconds)
-const futureSkewTolerance = process.env.FUTURE_SKEW_TOLERANCE ?? 120;
-
-let exitOnSubgraphFailure;
-if (process.env.EXIT_ON_SUBGRAPH_FAILURE) {
-  exitOnSubgraphFailure = process.env.EXIT_ON_SUBGRAPH_FAILURE === 'true' ? true : false;
-} else {
-  exitOnSubgraphFailure = false;
-}
-
 export const env = {
-  KEEPER_INTERVAL_MS: Number(process.env.KEEPER_INTERVAL_MS),
-  VAULT_ADDRESS: process.env.VAULT_ADDRESS,
-  VAULT_AUTH_ADDRESS: process.env.VAULT_AUTH_ADDRESS,
-  PRIVATE_KEY: process.env.PRIVATE_KEY,
-  OPTIMAL_BUCKET_DIFF: BigInt(process.env.OPTIMAL_BUCKET_DIFF!),
-  ORACLE_API_URL: process.env.ORACLE_API_URL,
-  RPC_URL: process.env.RPC_URL,
-  QUOTE_TOKEN_ADDRESS: process.env.QUOTE_TOKEN_ADDRESS!.toLowerCase(),
-  CONFIRMATIONS: process.env.CONFIRMATIONS,
-  BUFFER_PADDING: BigInt(bufferPadding),
-  GAS_BUFFER: gasBuffer,
-  DEFAULT_GAS: BigInt(defaultGas),
-  MIN_MOVE_AMOUNT: BigInt(minAmount),
+  RPC_URL: process.env.RPC_URL!,
+  PRIVATE_KEY: process.env.PRIVATE_KEY!,
+  SUBGRAPH_URL: process.env.SUBGRAPH_URL!,
   ORACLE_API_KEY: process.env.ORACLE_API_KEY,
   ORACLE_API_TIER: process.env.ORACLE_API_TIER,
-  ONCHAIN_ORACLE_PRIMARY: process.env.ONCHAIN_ORACLE_PRIMARY === 'true' ? true : false,
-  ONCHAIN_ORACLE_ADDRESS: process.env.ONCHAIN_ORACLE_ADDRESS,
-  ONCHAIN_ORACLE_MAX_STALENESS: process.env.ONCHAIN_ORACLE_MAX_STALENESS
-    ? Number(process.env.ONCHAIN_ORACLE_MAX_STALENESS)
-    : null,
-  LOG_LEVEL: process.env.LOG_LEVEL,
-  SUBGRAPH_URL: process.env.SUBGRAPH_URL,
-  MIN_TIME_SINCE_BANKRUPTCY: BigInt(minTimeSinceBankruptcy),
-  MAX_AUCTION_AGE: Number(maxAuctionAge),
-  FUTURE_SKEW_TOLERANCE: Number(futureSkewTolerance),
-  EXIT_ON_SUBGRAPH_FAILURE: exitOnSubgraphFailure,
-  CHAIN_ID: Number(process.env.CHAIN_ID),
-  FIXED_PRICE: process.env.FIXED_PRICE ? Number(process.env.FIXED_PRICE) : undefined,
-  HALT_KEEPER_IF_LUP_BELOW_HTP: process.env.HALT_KEEPER_IF_LUP_BELOW_HTP === 'false' ? false : true,
 };

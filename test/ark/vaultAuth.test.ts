@@ -1,12 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { createVault } from '../../src/ark/vault';
+import { config } from '../../src/utils/config';
 import { setBufferRatio, setMinBucketIndex } from '../helpers/vaultHelpers';
-import type { Address } from 'viem';
 
-const vault = createVault(
-  process.env.VAULT_ADDRESS as Address,
-  process.env.VAULT_AUTH_ADDRESS as Address,
-);
+const vault = createVault(config.arks[0]!.vaultAddress, config.arks[0]!.vaultAuthAddress);
 
 describe('vault auth interface', () => {
   it('can query buffer ratio', async () => {

@@ -12,13 +12,11 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      ONCHAIN_ORACLE_ADDRESS: "0x74661a9ea74fD04975c6eBc6B155Abf8f885636c"
       ORACLE_API_TIER: "demo"
       RPC_URL: "http://127.0.0.1:8545"
       MAINNET_RPC_URL: ${{ secrets. MAINNET_RPC_URL }}
       ORACLE_API_KEY: ${{ secrets.ORACLE_API_KEY }}
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-      ORACLE_API_URL: ${{ secrets.ORACLE_API_URL }}
       SUBGRAPH_URL: ${{ secrets. SUBGRAPH_URL }}
       START_ANVIL: false
 

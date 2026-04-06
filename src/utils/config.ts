@@ -2,15 +2,58 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { Address } from 'viem';
 
+// ============= Raw JSON Types =============
+
 type ArkConfig = {
   address: Address;
+  vaultAddress: Address;
+  vaultAuthAddress: Address;
   allocation: {
     min: number;
     max: number;
   };
+  optimalBucketDiff?: number;
+  bufferPadding?: string;
+  minMoveAmount?: string;
+  minTimeSinceBankruptcy?: number;
+  maxAuctionAge?: number;
 };
 
-type Config = {
+type RawConfig = {
+  chainId: number;
+  quoteTokenAddress: string;
+  metavaultAddress?: string;
+
+  keeper: {
+    intervalMs: number;
+    logLevel?: string;
+    exitOnSubgraphFailure?: boolean;
+    haltIfLupBelowHtp: boolean;
+  };
+
+  oracle: {
+    apiUrl?: string;
+    onchainPrimary: boolean;
+    onchainAddress?: string;
+    onchainMaxStaleness: number | null;
+    fixedPrice: number | null;
+    futureSkewTolerance?: number;
+  };
+
+  arkGlobal: {
+    optimalBucketDiff?: number;
+    bufferPadding?: string;
+    minMoveAmount?: string;
+    minTimeSinceBankruptcy?: number;
+    maxAuctionAge?: number;
+  };
+
+  transaction: {
+    gasBuffer?: number;
+    defaultGas?: number;
+    confirmations: number;
+  };
+
   arks: ArkConfig[];
   buffer: {
     address: Address;
@@ -19,14 +62,11 @@ type Config = {
   minRateDiff: number;
 };
 
-const raw: Config = JSON.parse(readFileSync(join(process.cwd(), 'config.json'), 'utf-8'));
+// ============= Parse & Validate =============
 
-if (raw.arks.length === 0) {
-  throw new Error('config.json: arks must not be empty');
-}
+const raw: RawConfig = JSON.parse(readFileSync(join(process.cwd(), 'config.json'), 'utf-8'));
 
 for (const [i, ark] of raw.arks.entries()) {
-  if (!ark.address) throw new Error(`config.json: arks[${i}] missing address`);
   if (ark.allocation.max === 0)
     throw new Error(`config.json: arks[${i}].allocation.max must not be 0`);
   if (ark.allocation.min > ark.allocation.max)
@@ -35,16 +75,82 @@ for (const [i, ark] of raw.arks.entries()) {
     );
 }
 
-if (!raw.buffer.address) throw new Error('config.json: buffer missing address');
-if (raw.buffer.allocation === 0) throw new Error('config.json: buffer.allocation must not be 0');
+if (raw.arks.length > 0 && raw.buffer.allocation > 0) {
+  const maxSum = raw.arks.reduce((sum, ark) => sum + ark.allocation.max, 0);
+  if (maxSum + raw.buffer.allocation !== 100) {
+    throw new Error(
+      `config.json: sum of ark max allocations (${maxSum}) + buffer allocation (${raw.buffer.allocation}) must equal 100`,
+    );
+  }
+}
 
-const maxSum = raw.arks.reduce((sum, ark) => sum + ark.allocation.max, 0);
-if (maxSum + raw.buffer.allocation !== 100) {
-  throw new Error(
-    `config.json: sum of ark max allocations (${maxSum}) + buffer allocation (${raw.buffer.allocation}) must equal 100`,
-  );
+if (!raw.oracle.onchainPrimary && !raw.oracle.fixedPrice) {
+  if (!raw.oracle.apiUrl)
+    throw new Error(
+      'config.json: oracle.apiUrl is required when onchainPrimary is false and fixedPrice is not set',
+    );
+}
+
+if (raw.oracle.onchainPrimary && !raw.oracle.onchainAddress) {
+  throw new Error('config.json: oracle.onchainAddress is required when onchainPrimary is true');
+}
+
+raw.keeper.exitOnSubgraphFailure ??= false;
+raw.oracle.futureSkewTolerance ??= 120;
+raw.arkGlobal.bufferPadding ??= '100000000000000';
+raw.arkGlobal.minMoveAmount ??= '1000001';
+raw.arkGlobal.minTimeSinceBankruptcy ??= 259200;
+raw.arkGlobal.maxAuctionAge ??= 259200;
+raw.transaction.gasBuffer =
+  !raw.transaction.gasBuffer || BigInt(raw.transaction.gasBuffer) === 0n
+    ? 50
+    : raw.transaction.gasBuffer;
+raw.transaction.defaultGas ??= 5000000;
+
+if (!raw.arkGlobal.optimalBucketDiff) {
+  const missing = raw.arks
+    .map((ark, i) => (ark.optimalBucketDiff == null ? i : null))
+    .filter((i) => i !== null);
+  if (missing.length > 0) {
+    throw new Error(
+      `config.json: optimalBucketDiff must be set globally in arkGlobal or individually for every ark (missing on arks: ${missing.join(', ')})`,
+    );
+  }
 }
 
 if (!raw.minRateDiff) raw.minRateDiff = 10;
+if (!raw.quoteTokenAddress) throw new Error('config.json: quoteTokenAddress is required');
 
-export const config = raw;
+// ============= Export =============
+
+export type ResolvedArkSettings = {
+  optimalBucketDiff: bigint;
+  bufferPadding: bigint;
+  minMoveAmount: bigint;
+  minTimeSinceBankruptcy: bigint;
+  maxAuctionAge: number;
+};
+
+export function resolveArkSettings(ark: ArkConfig): ResolvedArkSettings {
+  return {
+    optimalBucketDiff: BigInt(ark.optimalBucketDiff ?? raw.arkGlobal.optimalBucketDiff!),
+    bufferPadding: BigInt(ark.bufferPadding ?? raw.arkGlobal.bufferPadding!),
+    minMoveAmount: BigInt(ark.minMoveAmount ?? raw.arkGlobal.minMoveAmount!),
+    minTimeSinceBankruptcy: BigInt(
+      ark.minTimeSinceBankruptcy ?? raw.arkGlobal.minTimeSinceBankruptcy!,
+    ),
+    maxAuctionAge: ark.maxAuctionAge ?? raw.arkGlobal.maxAuctionAge!,
+  };
+}
+
+export const config = {
+  ...raw,
+  keeper: raw.keeper as Required<RawConfig['keeper']>,
+  oracle: raw.oracle as Required<RawConfig['oracle']>,
+  arkGlobal: raw.arkGlobal as Required<RawConfig['arkGlobal']>,
+  transaction: raw.transaction as Required<RawConfig['transaction']>,
+  quoteTokenAddress: raw.quoteTokenAddress.toLowerCase() as Address,
+  metavaultAddress: (raw.metavaultAddress || undefined) as Address | undefined,
+  defaultGas: BigInt(raw.transaction.defaultGas!),
+  gasBuffer: BigInt(raw.transaction.gasBuffer!),
+};

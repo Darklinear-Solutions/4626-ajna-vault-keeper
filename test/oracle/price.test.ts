@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { getPrice } from '../../src/oracle/price.ts';
-import { env } from '../../src/utils/env.ts';
+import { config } from '../../src/utils/config.ts';
 
 describe('getPrice', () => {
   beforeAll(() => {
-    env.FIXED_PRICE = 0;
+    config.oracle.fixedPrice = null;
   });
 
   it('returns price from either feed', async () => {
@@ -15,11 +15,11 @@ describe('getPrice', () => {
 
 describe('get fixed price', () => {
   beforeAll(() => {
-    env.FIXED_PRICE = 1;
+    config.oracle.fixedPrice = 1;
   });
 
   afterAll(() => {
-    env.FIXED_PRICE = 0;
+    config.oracle.fixedPrice = null;
   });
 
   it('returns properly converted fixed price', async () => {

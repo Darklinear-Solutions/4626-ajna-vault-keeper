@@ -13,11 +13,13 @@ import {
   useMocks,
 } from '../helpers/vaultHelpers';
 import { createVault } from '../../src/ark/vault';
-import { run } from '../../src/keepers/arkKeeper';
+import { arkRun } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
-import { env } from '../../src/utils/env';
+import { config, resolveArkSettings } from '../../src/utils/config';
 import { request } from 'graphql-request';
 import type { Address } from 'viem';
+
+const testSettings = resolveArkSettings(config.arks[0]!);
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 describe('keeper run failure', () => {
@@ -47,10 +49,10 @@ describe('keeper run failure', () => {
   });
 
   it('skips run if optimal bucket is out of range', async () => {
-    env.OPTIMAL_BUCKET_DIFF = 15n;
-    await run(
+    await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+      { ...testSettings, optimalBucketDiff: 15n },
     );
 
     const buckets = await vault.getBuckets();
@@ -58,15 +60,14 @@ describe('keeper run failure', () => {
       const balance = await vault.lpToValue(buckets[i]!);
       expect(balance).toBe(100000000000000000000n);
     }
-
-    env.OPTIMAL_BUCKET_DIFF = 1n;
   });
 
   it('skips run if optimal bucket is dusty', async () => {
     await setLps(100000n);
-    await run(
+    await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+      testSettings,
     );
 
     const buckets = await vault.getBuckets();
@@ -85,9 +86,10 @@ describe('keeper run failure', () => {
     });
 
     await setAuctionStatus(borrower, kickTime, 0n, 1000000000n);
-    await run(
+    await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+      testSettings,
     );
 
     const buckets = await vault.getBuckets();
@@ -101,9 +103,10 @@ describe('keeper run failure', () => {
     const bankruptcyTime = BigInt(Math.floor(Date.now() / 1000) - 86400);
     await setBankruptcyTime(bankruptcyTime);
 
-    await run(
+    await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+      testSettings,
     );
 
     const buckets = await vault.getBuckets();

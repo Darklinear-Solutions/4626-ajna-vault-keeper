@@ -1,5 +1,6 @@
 import { gql, request } from 'graphql-request';
 import { env } from '../utils/env';
+import { config } from '../utils/config';
 import { log } from '../utils/logger';
 import type { Address } from 'viem';
 
@@ -18,10 +19,13 @@ type VaultLike = {
   getAuctionStatus: (borrower: Address) => Promise<readonly [bigint, bigint, bigint, ...unknown[]]>;
 };
 
-export async function poolHasBadDebt(vault: VaultLike): Promise<boolean> {
+export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): Promise<boolean> {
   const unfilteredAuctions = await _getUnsettledAuctions(vault);
   if (unfilteredAuctions === 'error') return true;
-  const auctionsBeforeCutoff = _filterAuctions(unfilteredAuctions as GetUnsettledAuctionsResponse);
+  const auctionsBeforeCutoff = _filterAuctions(
+    unfilteredAuctions as GetUnsettledAuctionsResponse,
+    maxAuctionAge,
+  );
 
   for (let i = 0; i < auctionsBeforeCutoff.length; i++) {
     const [kickTime, collateralRemaining, debtRemaining] = await vault.getAuctionStatus(
@@ -61,13 +65,16 @@ export async function _getUnsettledAuctions(
       'subgraph query failed',
     );
 
-    return env.EXIT_ON_SUBGRAPH_FAILURE ? 'error' : { liquidationAuctions: [] };
+    return config.keeper.exitOnSubgraphFailure ? 'error' : { liquidationAuctions: [] };
   }
 }
 
-export function _filterAuctions(response: GetUnsettledAuctionsResponse): LiquidationAuction[] {
+export function _filterAuctions(
+  response: GetUnsettledAuctionsResponse,
+  maxAuctionAge?: number,
+): LiquidationAuction[] {
   const unsettledAuctions = response.liquidationAuctions;
-  const maxAge = env.MAX_AUCTION_AGE;
+  const maxAge = maxAuctionAge ?? config.arkGlobal.maxAuctionAge;
 
   if (maxAge === 0) return unsettledAuctions;
 

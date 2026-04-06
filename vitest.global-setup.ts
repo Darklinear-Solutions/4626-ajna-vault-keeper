@@ -11,17 +11,6 @@ if (!process.env.MAINNET_RPC_URL) {
 }
 process.env.RPC_URL = 'http://127.0.0.1:8545';
 process.env.PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-process.env.CHAIN_ID = '1';
-process.env.OPTIMAL_BUCKET_DIFF = '1';
-process.env.ONCHAIN_ORACLE_PRIMARY = 'true';
-process.env.ONCHAIN_ORACLE_ADDRESS = '0x74661a9ea74fD04975c6eBc6B155Abf8f885636c';
-process.env.MIN_MOVE_AMOUNT = '1000000';
-process.env.LOG_LEVEL = 'warn';
-process.env.KEEPER_INTERVAL_MS = '43200000';
-process.env.ORACLE_API_URL =
-  'https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=0x6B175474E89094C44Da98b954EedeAC495271d0F&vs_currencies=usd';
-process.env.QUOTE_TOKEN_ADDRESS = '0x6b175474e89094c44da98b954eedeac495271d0f';
-process.env.FIXED_PRICE = '0';
 
 let anvilProcess: ReturnType<typeof spawn>;
 
@@ -100,14 +89,23 @@ async function deployContracts(): Promise<void> {
     const addresses = dotenv.parse(addressesContent);
 
     if (process.env.METAVAULT !== 'true') {
-      process.env.VAULT_ADDRESS = addresses.VAULT_ADDRESS;
-      process.env.VAULT_AUTH_ADDRESS = addresses.VAULT_AUTH_ADDRESS;
       process.env.MOCK_VAULT_ADDRESS = addresses.MOCK_VAULT_ADDRESS;
       process.env.MOCK_VAULT_AUTH_ADDRESS = addresses.MOCK_VAULT_AUTH_ADDRESS;
       process.env.MOCK_CHRONICLE_ADDRESS = addresses.MOCK_CHRONICLE_ADDRESS;
       process.env.INTEGRATION_TEST = 'true';
+
+      const testConfig = JSON.parse(
+        fs.readFileSync(path.join(process.cwd(), 'config.test.json'), 'utf-8'),
+      );
+      for (const ark of testConfig.arks) {
+        ark.vaultAddress = addresses.VAULT_ADDRESS;
+        ark.vaultAuthAddress = addresses.VAULT_AUTH_ADDRESS;
+      }
+      fs.writeFileSync(
+        path.join(process.cwd(), 'config.json'),
+        JSON.stringify(testConfig, null, 2),
+      );
     } else {
-      process.env.METAVAULT_ADDRESS = addresses.METAVAULT_ADDRESS;
       process.env.AAVE_VAULT_ADDRESS = addresses.AAVE_VAULT_ADDRESS;
       process.env.ARK_1_ADDRESS = addresses.ARK_1_ADDRESS;
       process.env.ARK_2_ADDRESS = addresses.ARK_2_ADDRESS;
@@ -119,6 +117,7 @@ async function deployContracts(): Promise<void> {
       const testConfig = JSON.parse(
         fs.readFileSync(path.join(process.cwd(), 'config.test.json'), 'utf-8'),
       );
+      testConfig.metavaultAddress = addresses.METAVAULT_ADDRESS;
       testConfig.arks[0].address = addresses.ARK_1_ADDRESS;
       testConfig.arks[1].address = addresses.ARK_2_ADDRESS;
       testConfig.arks[2].address = addresses.ARK_3_ADDRESS;

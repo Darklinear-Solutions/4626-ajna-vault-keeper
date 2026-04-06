@@ -4,11 +4,11 @@ import { contract } from '../utils/contract';
 
 const buffer = (bufferAddress: Address) => contract('buffer', bufferAddress);
 
-export function createVault(address?: Address, vaultAuthAddress?: Address) {
-  const vault = address ? contract('vault', address) : contract('vault');
+export function createVault(address: Address, vaultAuthAddress?: Address) {
+  const vault = contract('vault', address);
   const vaultAuth = vaultAuthAddress
     ? contract('vaultAuth', vaultAuthAddress)
-    : contract('vaultAuth');
+    : contract('vaultAuth', address);
 
   let _poolInfoUtilsFn: (() => any) | undefined;
   let _poolFn: (() => any) | undefined;

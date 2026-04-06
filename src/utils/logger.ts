@@ -1,9 +1,9 @@
 import pino from 'pino';
-import { env } from './env.ts';
+import { config } from './config.ts';
 
 export const log = pino(
   {
-    level: env.LOG_LEVEL ?? 'info',
+    level: config.keeper.logLevel ?? 'info',
     redact: ['env.PRIVATE_KEY', 'env.ORACLE_API_KEY', 'env.RPC_URL'],
   },
   pino.destination({ sync: true }),

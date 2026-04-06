@@ -1,15 +1,24 @@
-import { describe, it, expect } from 'vitest';
-import { _calculateBufferTarget, _calculateOptimalBucket } from '../../src/keepers/arkKeeper';
+import { describe, it, expect, beforeAll } from 'vitest';
+import {
+  _calculateBufferTarget,
+  _calculateOptimalBucket,
+  initArkKeeper,
+} from '../../src/keepers/arkKeeper';
 import { getPrice } from '../../src/oracle/price';
 import { createVault } from '../../src/ark/vault';
-import type { Address } from 'viem';
+import { config, resolveArkSettings } from '../../src/utils/config';
 
-const vault = createVault(
-  process.env.VAULT_ADDRESS as Address,
-  process.env.VAULT_AUTH_ADDRESS as Address,
-);
+const vault = createVault(config.arks[0]!.vaultAddress, config.arks[0]!.vaultAuthAddress);
 
 describe('keeper calculations', () => {
+  beforeAll(() => {
+    initArkKeeper(
+      config.arks[0]!.vaultAddress,
+      config.arks[0]!.vaultAuthAddress,
+      resolveArkSettings(config.arks[0]!),
+    );
+  });
+
   it('correctly calculates buffer target', async () => {
     const target = await _calculateBufferTarget();
     expect(50000000000000000000n - target).toBeLessThan(150000);

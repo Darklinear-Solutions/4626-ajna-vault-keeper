@@ -2,9 +2,12 @@ import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { setBufferRatio, setMockState, useMocks } from '../helpers/vaultHelpers';
 import { getPrice } from '../../src/oracle/price';
 import { createVault } from '../../src/ark/vault';
-import { run } from '../../src/keepers/arkKeeper';
+import { arkRun } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
+import { config, resolveArkSettings } from '../../src/utils/config';
 import type { Address } from 'viem';
+
+const testSettings = resolveArkSettings(config.arks[0]!);
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 describe('keeper run success', () => {
@@ -57,9 +60,10 @@ describe('keeper run success', () => {
     const optimalBucketBalanceBefore = await vault.lpToValue(4157n);
     const dustyBucketBefore = await vault.lpToValue(4149n);
 
-    await run(
+    await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+      testSettings,
     );
 
     const optimalBucketBalanceAfter = await vault.lpToValue(4157n);
@@ -86,7 +90,7 @@ describe('keeper run success', () => {
     expect(optimalBucketBalanceAfter - optimalBucketBalanceBefore).toBe(expectedMoveAmount);
 
     // Assert that minimum move balance is respected
-    expect(dustyBucketBefore).toBeLessThan(BigInt(process.env.MIN_MOVE_AMOUNT!));
+    expect(dustyBucketBefore).toBeLessThan(testSettings.minMoveAmount);
     expect(dustyBucketBefore).toBe(dustyBucketAfter);
   });
 
@@ -95,9 +99,10 @@ describe('keeper run success', () => {
     const bufferTotalBefore = await vault.getBufferTotal();
     const optimalBucketBalanceBefore = await vault.lpToValue(4157n);
 
-    await run(
+    await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,
       process.env.MOCK_VAULT_AUTH_ADDRESS as Address,
+      testSettings,
     );
 
     const bufferTotalAfter = await vault.getBufferTotal();

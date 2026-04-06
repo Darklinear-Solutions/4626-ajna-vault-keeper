@@ -1,7 +1,7 @@
 import { getAbi } from '../utils/abi';
 import { getAddress } from '../utils/address';
 import { client, readOnlyClient } from '../utils/client';
-import { env } from '../utils/env';
+import { config } from '../utils/config';
 import { log } from '../utils/logger';
 import type { Address } from 'viem';
 
@@ -11,11 +11,11 @@ type PriceData = {
   client: typeof client | typeof readOnlyClient;
 };
 
-const MAX_STALENESS_SECS = BigInt(env.ONCHAIN_ORACLE_MAX_STALENESS ?? '0');
-const FUTURE_SKEW_TOLERANCE_SECS = BigInt(env.FUTURE_SKEW_TOLERANCE);
+const MAX_STALENESS_SECS = BigInt(config.oracle.onchainMaxStaleness ?? 0);
+const FUTURE_SKEW_TOLERANCE_SECS = BigInt(config.oracle.futureSkewTolerance);
 
 export async function getOnchainPrice(): Promise<bigint> {
-  if (!env.ONCHAIN_ORACLE_ADDRESS) throw new Error('onchain oracle address is undefined');
+  if (!config.oracle.onchainAddress) throw new Error('onchain oracle address is undefined');
 
   const priceData = await _queryChronicle();
   const [price, rawAge] = priceData.value;

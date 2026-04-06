@@ -1,4 +1,4 @@
-import { config } from '../utils/config';
+import { config, resolveArkSettings } from '../utils/config';
 import { createVault } from '../ark/vault';
 import { evaluateRates, type ArkEvaluation } from '../metavault/utils/evaluateRates';
 import {
@@ -12,7 +12,6 @@ import { log } from '../utils/logger';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction';
 import { selectBuckets } from '../ark/utils/selectBuckets';
 import { type Address, maxUint256 } from 'viem';
-import { env } from '../utils/env';
 
 // ============= Types =============
 
@@ -31,6 +30,7 @@ export type ArkAllocation = {
   min: number;
   max: number;
   rate: bigint;
+  minMoveAmount: bigint;
 };
 
 export type BufferAllocation = {
@@ -42,7 +42,7 @@ export type BufferAllocation = {
 
 // ============= Main Run Function =============
 
-export async function run() {
+export async function metavaultRun() {
   const pausedArks = await _getPausedArks();
   if (pausedArks.length > 0) {
     return log.info(
@@ -96,6 +96,7 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
     const balance = (await getExpectedSupplyAssets(arkConfig.address)) as bigint;
     const cappedBalance = await poolBalanceCap(balance, vault);
     const rate = (await vault.getBorrowFeeRate()) as bigint;
+    const settings = resolveArkSettings(arkConfig);
 
     allocations.push({
       id: arkConfig.address,
@@ -105,6 +106,7 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
       min: arkConfig.allocation.min,
       max: arkConfig.allocation.max,
       rate,
+      minMoveAmount: settings.minMoveAmount,
     });
   }
 
@@ -139,11 +141,16 @@ export function _rebalanceBuffer(
   }
 
   const bufferTarget = (totalAssets * BigInt(buffer.allocation)) / 100n;
+  const bufferMinMoveAmount = BigInt(config.arkGlobal.minMoveAmount);
 
   if (buffer.assets < bufferTarget) {
-    _fillBuffer(arks, buffer, bufferTarget, totalAssets);
+    if (bufferTarget - buffer.assets >= bufferMinMoveAmount) {
+      _fillBuffer(arks, buffer, bufferTarget, totalAssets);
+    }
   } else if (buffer.assets > bufferTarget) {
-    _drainBuffer(arks, buffer, bufferTarget, totalAssets);
+    if (buffer.assets - bufferTarget >= bufferMinMoveAmount) {
+      _drainBuffer(arks, buffer, bufferTarget, totalAssets);
+    }
   }
 }
 
@@ -165,7 +172,7 @@ function _fillBuffer(
     if (available <= 0n) continue;
 
     const deduction = available < deficit ? available : deficit;
-    if (deduction < env.MIN_MOVE_AMOUNT) continue;
+    if (deduction < ark.minMoveAmount) continue;
     ark.assets -= deduction;
     buffer.assets += deduction;
     deficit -= deduction;
@@ -190,7 +197,7 @@ function _drainBuffer(
     if (capacity <= 0n) continue;
 
     const addition = capacity < excess ? capacity : excess;
-    if (addition < env.MIN_MOVE_AMOUNT) continue;
+    if (addition < ark.minMoveAmount) continue;
     ark.assets += addition;
     buffer.assets -= addition;
     excess -= addition;
@@ -229,7 +236,7 @@ export function _reallocateForRates(
       if (capacity <= 0n) continue;
 
       const moveAmount = available < capacity ? available : capacity;
-      if (moveAmount < env.MIN_MOVE_AMOUNT) continue;
+      if (moveAmount < ark.minMoveAmount) continue;
       ark.assets -= moveAmount;
       target.assets += moveAmount;
       available -= moveAmount;

@@ -1,11 +1,22 @@
-import { env } from './env';
+import { config, resolveArkSettings } from './config';
 import { log } from './logger';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { metavaultRun } from '../keepers/metavaultKeeper';
+import { arkRun } from '../keepers/arkKeeper';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-export function startScheduler(run: () => Promise<void> | void) {
-  const interval = env.KEEPER_INTERVAL_MS;
+async function run() {
+  await metavaultRun();
+
+  for (const ark of config.arks) {
+    const settings = resolveArkSettings(ark);
+    await arkRun(ark.vaultAddress, ark.vaultAuthAddress, settings);
+  }
+}
+
+export function startScheduler() {
+  const interval = config.keeper.intervalMs;
 
   const ac = new AbortController();
   const { signal } = ac;

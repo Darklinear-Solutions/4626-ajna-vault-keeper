@@ -1,6 +1,6 @@
 import { log } from './logger';
 import { client } from './client';
-import { env } from './env';
+import { config } from './config';
 import { getAddress, type contracts } from './address';
 import { getAbi, type ContractAbiKey } from './abi';
 import { haltKeeper } from '../keepers/arkKeeper';
@@ -15,7 +15,7 @@ export type TransactionData = {
 };
 type ContractKey = keyof typeof contracts;
 
-const confirmations = Number(env.CONFIRMATIONS ?? 1);
+const confirmations = config.transaction.confirmations;
 
 export async function wait(txHash: Hash): Promise<TransactionReceipt> {
   const receipt = await client.waitForTransactionReceipt({
@@ -36,7 +36,7 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
       const data = err?.cause?.cause?.data ?? err?.cause?.data ?? err?.data;
 
       if (isLupBelowHtp(err)) {
-        if (env.HALT_KEEPER_IF_LUP_BELOW_HTP) haltKeeper();
+        if (config.keeper.haltIfLupBelowHtp) haltKeeper();
         throw Object.assign(
           new Error(
             'LUPBelowHTP. Vault funds have been lent out by the pool and cannot be moved. Consider running the AJNA Keeper to check for necessary liquidations.',
@@ -185,7 +185,7 @@ export async function getGasWithBuffer(
   args: readonly unknown[],
   address?: Address,
 ): Promise<bigint> {
-  const defaultGas = env.DEFAULT_GAS;
+  const defaultGas = config.defaultGas;
   const resolvedAddress = address ?? (await getAddress(contract as ContractKey));
   const abi = getAbi(contract as ContractAbiKey);
 
@@ -199,7 +199,7 @@ export async function getGasWithBuffer(
       args,
       ...fees,
     });
-    return estimated + (estimated * env.GAS_BUFFER) / 100n;
+    return estimated + (estimated * config.gasBuffer) / 100n;
   } catch (err) {
     log.warn(
       {

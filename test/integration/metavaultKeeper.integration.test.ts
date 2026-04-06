@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import { run } from '../../src/keepers/metavaultKeeper';
+import { metavaultRun } from '../../src/keepers/metavaultKeeper';
 import {
   getExpectedSupplyAssets,
   getTotalExpectedSupplyAssets,
@@ -49,7 +49,7 @@ describe('metavault keeper run', () => {
       expect(balance).toBe(0n);
     }
 
-    await run();
+    await metavaultRun();
 
     const after = await getBalances();
 
@@ -75,11 +75,11 @@ describe('metavault keeper run', () => {
 
   it('is a no-op when allocations are already at target', async () => {
     // First run: move funds from buffer to arks
-    await run();
+    await metavaultRun();
     const afterFirstRun = await getBalances();
 
     // Second run: should be a no-op since allocations are at target
-    await run();
+    await metavaultRun();
     const afterSecondRun = await getBalances();
 
     const tolerance = afterFirstRun.totalAssets / 1_000_000n || 1n;
@@ -100,7 +100,7 @@ describe('metavault keeper run', () => {
   });
 
   it('respects ark max allocation bounds', async () => {
-    await run();
+    await metavaultRun();
     const after = await getBalances();
     const tolerance = after.totalAssets / 1_000_000n || 1n;
 
@@ -113,7 +113,7 @@ describe('metavault keeper run', () => {
 
   it('preserves total assets across reallocation', async () => {
     const before = await getBalances();
-    await run();
+    await metavaultRun();
     const after = await getBalances();
 
     // Total should be the same (within rounding tolerance)
@@ -122,7 +122,7 @@ describe('metavault keeper run', () => {
 
   it('skips entire run when any ark is paused', async () => {
     // First run to distribute funds normally
-    await run();
+    await metavaultRun();
     const afterFirstRun = await getBalances();
 
     // Pause the first ark
@@ -131,7 +131,7 @@ describe('metavault keeper run', () => {
     await arkAuth().write.pause();
 
     // Second run should be a no-op (early return due to paused ark)
-    await run();
+    await metavaultRun();
 
     // Unpause and verify nothing changed
     await arkAuth().write.unpause();
@@ -149,7 +149,7 @@ describe('metavault keeper run', () => {
 
   it('rebalances correctly after additional deposit into metavault', async () => {
     // First run to establish initial allocations
-    await run();
+    await metavaultRun();
     const afterFirstRun = await getBalances();
 
     // Deposit additional funds into the metavault (goes to buffer via supply queue)
@@ -172,7 +172,7 @@ describe('metavault keeper run', () => {
       address: quoteTokenAddress,
       abi: erc20ApproveAbi,
       functionName: 'approve',
-      args: [process.env.METAVAULT_ADDRESS as Address, depositAmount],
+      args: [config.metavaultAddress as Address, depositAmount],
     });
     await metavault().write.deposit([depositAmount, client.account.address]);
 
@@ -180,7 +180,7 @@ describe('metavault keeper run', () => {
     expect(afterDeposit.totalAssets).toBeGreaterThan(afterFirstRun.totalAssets);
 
     // Second run should redistribute the excess
-    await run();
+    await metavaultRun();
     const afterSecondRun = await getBalances();
 
     const tolerance = afterSecondRun.totalAssets / 1_000_000n || 1n;
@@ -204,7 +204,7 @@ describe('metavault keeper run', () => {
   });
 
   it('sum of all strategy balances equals totalAssets after reallocation', async () => {
-    await run();
+    await metavaultRun();
     const after = await getBalances();
 
     const sumOfBalances = after.bufferBalance + after.arkBalances.reduce((sum, b) => sum + b, 0n);
@@ -219,7 +219,7 @@ describe('metavault keeper run', () => {
 
   it('rebalances after a withdrawal reduces total assets', async () => {
     // First run distributes funds to arks
-    await run();
+    await metavaultRun();
     const afterFirstRun = await getBalances();
 
     // Withdraw from the metavault to reduce total assets, making arks overweight
@@ -235,7 +235,7 @@ describe('metavault keeper run', () => {
     expect(afterWithdraw.totalAssets).toBeLessThan(afterFirstRun.totalAssets);
 
     // Run again — should move funds from arks back to buffer to rebalance
-    await run();
+    await metavaultRun();
     const afterSecondRun = await getBalances();
 
     const tolerance = afterSecondRun.totalAssets / 1_000_000n || 1n;
@@ -271,7 +271,7 @@ describe('metavault keeper run', () => {
     await arkAuth().write.pause();
 
     // Run with ark 1 paused — it should be excluded
-    await run();
+    await metavaultRun();
     const whilePaused = await getBalances();
 
     // Ark 1 should have received nothing (it started empty and was paused)
@@ -281,7 +281,7 @@ describe('metavault keeper run', () => {
     await arkAuth().write.unpause();
 
     // Run again — should now include ark 1 in rebalancing
-    await run();
+    await metavaultRun();
     const afterUnpause = await getBalances();
 
     // Ark 1 should now have funds
