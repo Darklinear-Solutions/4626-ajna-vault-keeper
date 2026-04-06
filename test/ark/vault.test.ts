@@ -95,7 +95,7 @@ describe('vault operations', () => {
       vault.lpToValue(toIndex),
     ]);
 
-    const toAssets = 19999721737n;
+    const toAssets = assets / 2n;
     const gas = await getGasWithBuffer(
       'vault',
       'move',
