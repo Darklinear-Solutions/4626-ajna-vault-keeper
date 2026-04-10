@@ -12,4 +12,5 @@ out/
 .codeql-db
 codeql-results.sarif
 config.json
+/keystore/
 .claude/settings.local.json

@@ -8,6 +8,7 @@ import {
   type MarketAllocation,
 } from '../metavault/metavault';
 import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
+import { poolHasBadDebt } from '../subgraph/poolHealth';
 import { log } from '../utils/logger';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction';
 import { selectBuckets } from '../ark/utils/selectBuckets';
@@ -31,6 +32,7 @@ export type ArkAllocation = {
   max: number;
   rate: bigint;
   minMoveAmount: bigint;
+  hasBadDebt: boolean;
 };
 
 export type BufferAllocation = {
@@ -80,8 +82,7 @@ export async function metavaultRun() {
     );
   }
 
-  const gas = await getGasWithBuffer('metavault', 'reallocate', [allocations]);
-  await handleTransaction(reallocate(allocations, gas), { action: 'reallocate' });
+  await handleTransaction(reallocate(allocations, config.defaultGas), { action: 'reallocate' });
 
   log.info({ event: 'metavault_run_complete', allocations }, 'metavault run complete');
 }
@@ -93,10 +94,13 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
 
   for (const arkConfig of config.arks) {
     const vault = createVault(arkConfig.address);
-    const balance = (await getExpectedSupplyAssets(arkConfig.address)) as bigint;
-    const cappedBalance = await poolBalanceCap(balance, vault);
-    const rate = (await vault.getBorrowFeeRate()) as bigint;
     const settings = resolveArkSettings(arkConfig);
+    const [balance, rate, badDebt] = await Promise.all([
+      getExpectedSupplyAssets(arkConfig.address) as Promise<bigint>,
+      vault.getBorrowFeeRate() as Promise<bigint>,
+      poolHasBadDebt(vault, settings.maxAuctionAge),
+    ]);
+    const cappedBalance = await poolBalanceCap(balance, vault);
 
     allocations.push({
       id: arkConfig.address,
@@ -107,6 +111,7 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
       max: arkConfig.allocation.max,
       rate,
       minMoveAmount: settings.minMoveAmount,
+      hasBadDebt: badDebt,
     });
   }
 
@@ -177,6 +182,19 @@ function _fillBuffer(
     buffer.assets += deduction;
     deficit -= deduction;
   }
+
+  if (deficit > 0n) {
+    for (const ark of sorted) {
+      if (deficit <= 0n) break;
+      if (ark.assets <= 0n) continue;
+
+      const deduction = ark.assets < deficit ? ark.assets : deficit;
+      if (deduction < ark.minMoveAmount) continue;
+      ark.assets -= deduction;
+      buffer.assets += deduction;
+      deficit -= deduction;
+    }
+  }
 }
 
 function _drainBuffer(
@@ -191,6 +209,7 @@ function _drainBuffer(
 
   for (const ark of sorted) {
     if (excess <= 0n) break;
+    if (ark.hasBadDebt) continue;
 
     const maxAssets = (totalAssets * BigInt(ark.max)) / 100n;
     const capacity = maxAssets - ark.assets;
@@ -229,7 +248,7 @@ export function _reallocateForRates(
       if (available <= 0n) break;
 
       const target = arks.find((a) => a.id === targetAddress);
-      if (!target) continue;
+      if (!target || target.hasBadDebt) continue;
 
       const maxAssets = (totalAssets * BigInt(target.max)) / 100n;
       const capacity = maxAssets - target.assets;
@@ -274,12 +293,14 @@ export function _validateAllocations(
   totalAssets: bigint,
 ): string | null {
   const tolerance = totalAssets / 1_000_000n || 1n;
+  const bufferTarget = (totalAssets * BigInt(buffer.allocation)) / 100n;
+  const bufferAtTarget = buffer.assets >= bufferTarget || bufferTarget - buffer.assets <= tolerance;
 
   for (const ark of arks) {
     const minAssets = (totalAssets * BigInt(ark.min)) / 100n;
     const maxAssets = (totalAssets * BigInt(ark.max)) / 100n;
 
-    if (ark.assets + tolerance < minAssets) {
+    if (ark.assets + tolerance < minAssets && !bufferAtTarget) {
       return `Ark ${ark.id} allocation ${ark.assets} is below min ${minAssets}`;
     }
     if (ark.assets > maxAssets + tolerance) {
@@ -287,7 +308,6 @@ export function _validateAllocations(
     }
   }
 
-  const bufferTarget = (totalAssets * BigInt(buffer.allocation)) / 100n;
   const allArksAtMax = arks.every(
     (ark) => ark.assets + tolerance >= (totalAssets * BigInt(ark.max)) / 100n,
   );
@@ -296,7 +316,7 @@ export function _validateAllocations(
     if (buffer.assets + tolerance < bufferTarget) {
       return `Buffer allocation ${buffer.assets} is below target ${bufferTarget} despite all arks at max`;
     }
-  } else {
+  } else if (!bufferAtTarget) {
     const diff =
       buffer.assets > bufferTarget ? buffer.assets - bufferTarget : bufferTarget - buffer.assets;
     if (diff > tolerance) {

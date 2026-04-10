@@ -7,7 +7,9 @@ import { arkRun } from '../keepers/arkKeeper';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 async function run() {
-  await metavaultRun();
+  if (config.metavaultAddress) {
+    await metavaultRun();
+  }
 
   for (const ark of config.arks) {
     const settings = resolveArkSettings(ark);

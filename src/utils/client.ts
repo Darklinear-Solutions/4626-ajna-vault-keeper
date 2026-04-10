@@ -4,8 +4,8 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { env } from './env';
 import { config } from './config';
 import { log } from './logger';
+import { loadPrivateKeyFromKeystore } from './keystore';
 
-const account = privateKeyToAccount(env.PRIVATE_KEY as `0x${string}`);
 const transport = process.env.TEST_ENV === 'true' ? 'http://127.0.0.1:8545' : env.RPC_URL;
 
 function getChain(chainId: number): Chain {
@@ -33,13 +33,43 @@ function getChain(chainId: number): Chain {
 
 const targetChain = getChain(config.chainId);
 
-export const client = createWalletClient({
-  account: account,
-  chain: targetChain,
-  transport: http(transport),
-}).extend(publicActions);
+function buildClients(privateKey: `0x${string}`) {
+  const account = privateKeyToAccount(privateKey);
 
-export const readOnlyClient = createPublicClient({
-  chain: targetChain,
-  transport: http(transport),
-});
+  const walletClient = createWalletClient({
+    account,
+    chain: targetChain,
+    transport: http(transport),
+  }).extend(publicActions);
+
+  const publicClient = createPublicClient({
+    chain: targetChain,
+    transport: http(transport),
+  });
+
+  return { walletClient, publicClient } as const;
+}
+
+type Clients = ReturnType<typeof buildClients>;
+
+export let client: Clients['walletClient'];
+export let readOnlyClient: Clients['publicClient'];
+
+if (env.PRIVATE_KEY) {
+  const built = buildClients(env.PRIVATE_KEY as `0x${string}`);
+  client = built.walletClient;
+  readOnlyClient = built.publicClient;
+}
+
+export async function initClient(): Promise<void> {
+  if (client) return;
+
+  if (env.KEYSTORE_PATH) {
+    const privateKey = await loadPrivateKeyFromKeystore(env.KEYSTORE_PATH);
+    const built = buildClients(privateKey);
+    client = built.walletClient;
+    readOnlyClient = built.publicClient;
+  } else {
+    throw new Error('Either PRIVATE_KEY or KEYSTORE_PATH must be specified');
+  }
+}

@@ -58,6 +58,7 @@ function makeArk(overrides: Partial<ArkAllocation> & { id: Address }): ArkAlloca
     max: 20,
     rate: 100n,
     minMoveAmount: 1_000_001n,
+    hasBadDebt: false,
     ...overrides,
   };
 }
@@ -191,6 +192,45 @@ describe('_rebalanceBuffer', () => {
       expect(buffer.assets).toBe(400n * S);
     });
 
+    it('pulls below ark minimums when buffer target not met (buffer precedence)', () => {
+      // All ARKs at their min after first pass, but buffer still short
+      const arks = [
+        makeArk({ id: ADDR_A, assets: 60n * S, rate: 200n }), // min = 50*S
+        makeArk({ id: ADDR_B, assets: 60n * S, rate: 100n }), // min = 50*S
+      ];
+      const buffer = makeBuffer({ assets: 330n * S });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      // Buffer deficit = 70*S
+      // First pass: B(100) available = 10*S, deduct 10*S; A(200) available = 10*S, deduct 10*S
+      // Deficit remaining = 50*S
+      // Second pass (below mins): B has 50*S, deduct 50*S; A untouched
+      expect(arks[1]!.assets).toBe(0n);
+      expect(arks[0]!.assets).toBe(50n * S);
+      expect(buffer.assets).toBe(400n * S);
+    });
+
+    it('pulls below minimums from multiple arks in rate order', () => {
+      const arks = [
+        makeArk({ id: ADDR_A, assets: 55n * S, rate: 300n }), // min = 50*S
+        makeArk({ id: ADDR_B, assets: 55n * S, rate: 100n }), // min = 50*S
+        makeArk({ id: ADDR_C, assets: 55n * S, rate: 200n }), // min = 50*S
+      ];
+      const buffer = makeBuffer({ assets: 305n * S });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      // Buffer deficit = 95*S
+      // First pass: B(100) 5*S, C(200) 5*S, A(300) 5*S → deficit = 80*S
+      // Second pass: B(100) has 50*S, deduct 50*S → deficit = 30*S
+      //              C(200) has 50*S, deduct 30*S → deficit = 0
+      expect(arks[1]!.assets).toBe(0n); // B fully drained
+      expect(arks[2]!.assets).toBe(20n * S); // C partially drained
+      expect(arks[0]!.assets).toBe(50n * S); // A untouched in second pass
+      expect(buffer.assets).toBe(400n * S);
+    });
+
     it('skips deduction when amount is below MIN_MOVE_AMOUNT', () => {
       // Ark B has only 1*S above its min — below MIN_MOVE_AMOUNT (1_000_001)
       const arks = [
@@ -276,6 +316,21 @@ describe('_rebalanceBuffer', () => {
       expect(arks[0]!.assets).toBe(200n * S);
       expect(arks[2]!.assets).toBe(200n * S);
       expect(arks[1]!.assets).toBe(200n * S);
+      expect(buffer.assets).toBe(400n * S);
+    });
+
+    it('skips arks with bad debt when draining buffer', () => {
+      const arks = [
+        makeArk({ id: ADDR_A, assets: 100n * S, rate: 100n }),
+        makeArk({ id: ADDR_B, assets: 100n * S, rate: 200n, hasBadDebt: true }),
+      ];
+      const buffer = makeBuffer({ assets: 450n * S });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      // B has highest rate but bad debt — skipped. Excess goes to A.
+      expect(arks[1]!.assets).toBe(100n * S); // B unchanged
+      expect(arks[0]!.assets).toBe(150n * S); // A receives excess
       expect(buffer.assets).toBe(400n * S);
     });
 
@@ -447,6 +502,26 @@ describe('_reallocateForRates', () => {
     expect(arks[1]!.assets).toBe(150n * S);
   });
 
+  it('skips target arks with bad debt', () => {
+    const arks = [
+      makeArk({ id: ADDR_A, assets: 150n * S, min: 5, max: 20, rate: 100n }),
+      makeArk({ id: ADDR_B, assets: 100n * S, min: 5, max: 20, rate: 200n, hasBadDebt: true }),
+      makeArk({ id: ADDR_C, assets: 100n * S, min: 5, max: 20, rate: 300n }),
+    ];
+    const evaluations: ArkEvaluation[] = [
+      { address: ADDR_A, targets: [ADDR_C, ADDR_B] },
+      { address: ADDR_B, targets: [] },
+      { address: ADDR_C, targets: [] },
+    ];
+
+    _reallocateForRates(arks, evaluations, 1000n * S);
+
+    // B has bad debt — skipped as target. A moves to C only.
+    expect(arks[1]!.assets).toBe(100n * S); // B unchanged
+    expect(arks[0]!.assets).toBe(50n * S); // A drained to min
+    expect(arks[2]!.assets).toBe(200n * S); // C at max
+  });
+
   it('skips move when amount is below MIN_MOVE_AMOUNT', () => {
     // A has 1*S above min, B has 1*S capacity — both below MIN_MOVE_AMOUNT
     const arks = [
@@ -482,13 +557,22 @@ describe('_validateAllocations', () => {
     expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
-  it('returns error when ark is below min', () => {
+  it('returns error when ark is below min and buffer is not at target', () => {
     const arks = [
       makeArk({ id: ADDR_A, assets: 30n * S, min: 5, max: 20 }), // 30*S < 50*S (5%)
     ];
-    const buffer = makeBuffer({ assets: 400n * S });
+    const buffer = makeBuffer({ assets: 350n * S }); // below 40% target
 
     expect(_validateAllocations(arks, buffer, totalAssets)).toContain('below min');
+  });
+
+  it('allows ark below min when buffer is at target (buffer precedence)', () => {
+    const arks = [
+      makeArk({ id: ADDR_A, assets: 30n * S, min: 5, max: 20 }), // below 5% min
+    ];
+    const buffer = makeBuffer({ assets: 400n * S }); // at 40% target
+
+    expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
   it('returns error when ark is above max', () => {
