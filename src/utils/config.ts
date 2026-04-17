@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { Address } from 'viem';
+import { toAsset } from './decimalConversion.ts';
 
 // ============= Raw JSON Types =============
 
@@ -36,7 +37,7 @@ type RawConfig = {
     onchainPrimary: boolean;
     onchainAddress?: string;
     onchainMaxStaleness: number | null;
-    fixedPrice: number | null;
+    fixedPrice: string | null;
     futureSkewTolerance?: number;
   };
 
@@ -84,7 +85,18 @@ if (raw.arks.length > 0 && raw.buffer.allocation > 0) {
   }
 }
 
-if (!raw.oracle.onchainPrimary && !raw.oracle.fixedPrice) {
+if (raw.oracle.fixedPrice != null) {
+  if (typeof raw.oracle.fixedPrice !== 'string') {
+    throw new Error(
+      'config.json: oracle.fixedPrice must be a string decimal to avoid precision loss',
+    );
+  }
+  if (toAsset(raw.oracle.fixedPrice, 18) <= 0n) {
+    throw new Error('config.json: oracle.fixedPrice must be a positive decimal value');
+  }
+}
+
+if (!raw.oracle.onchainPrimary && raw.oracle.fixedPrice == null) {
   if (!raw.oracle.apiUrl)
     throw new Error(
       'config.json: oracle.apiUrl is required when onchainPrimary is false and fixedPrice is not set',

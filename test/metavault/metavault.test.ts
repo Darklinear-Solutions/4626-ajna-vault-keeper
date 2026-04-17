@@ -11,7 +11,7 @@ import {
 import { type Address, maxUint256 } from 'viem';
 import { client } from '../../src/utils/client';
 import { toWad } from '../../src/utils/decimalConversion';
-import { getGasWithBuffer, handleTransaction } from '../../src/utils/transaction';
+import { handleTransaction } from '../../src/utils/transaction';
 
 describe('metavault interface', () => {
   it('can read expectedSupplyAssets', async () => {
@@ -76,8 +76,7 @@ describe('reallocate', () => {
       },
     ];
 
-    const gas = await getGasWithBuffer('metavault', 'reallocate', [allocations]);
-    await handleTransaction(reallocate(allocations, gas), {
+    await handleTransaction(reallocate(allocations, 5000000n), {
       action: 'reallocate',
       allocations,
     });
@@ -114,8 +113,7 @@ describe('reallocate', () => {
       },
     ];
 
-    const gas = await getGasWithBuffer('metavault', 'reallocate', [allocations]);
-    await handleTransaction(reallocate(allocations, gas), {
+    await handleTransaction(reallocate(allocations, 5000000n), {
       action: 'reallocate',
       allocations,
     });

@@ -8,14 +8,14 @@ describe('getPrice', () => {
   });
 
   it('returns price from either feed', async () => {
-    const currentPrice = await getPrice(18);
+    const currentPrice = await getPrice();
     expect(currentPrice).toBe(999870478245824934n);
   });
 });
 
 describe('get fixed price', () => {
   beforeAll(() => {
-    config.oracle.fixedPrice = 1;
+    config.oracle.fixedPrice = '1.00';
   });
 
   afterAll(() => {
@@ -23,7 +23,7 @@ describe('get fixed price', () => {
   });
 
   it('returns properly converted fixed price', async () => {
-    const currentPrice = await getPrice(18);
+    const currentPrice = await getPrice();
     expect(currentPrice).toBe(1000000000000000000n);
   });
 });

@@ -4,16 +4,17 @@ import { toAsset } from '../utils/decimalConversion.ts';
 import { getOffchainPrice } from './offchain.ts';
 import { getOnchainPrice } from './onchain.ts';
 
-type PriceSource = () => Promise<bigint | number>;
+const AJNA_PRICE_DECIMALS = 18;
+
+type PriceSource = () => Promise<bigint | string>;
 
 const SOURCES: Record<'onchain' | 'offchain', PriceSource> = {
   onchain: getOnchainPrice,
   offchain: getOffchainPrice,
 };
 
-export async function getPrice(assetDecimals: number): Promise<bigint> {
-  if (config.oracle.fixedPrice && config.oracle.fixedPrice > 0)
-    return getFixedPrice(config.oracle.fixedPrice, assetDecimals);
+export async function getPrice(): Promise<bigint> {
+  if (config.oracle.fixedPrice != null) return getFixedPrice(config.oracle.fixedPrice);
 
   const errors: Error[] = [];
   const order: ('onchain' | 'offchain')[] = config.oracle.onchainPrimary
@@ -23,7 +24,10 @@ export async function getPrice(assetDecimals: number): Promise<bigint> {
   for (const tag of order) {
     try {
       const price = await SOURCES[tag]();
-      return typeof price === 'bigint' ? price : toAsset(price, assetDecimals);
+      const normalizedPrice =
+        typeof price === 'bigint' ? price : toAsset(price, AJNA_PRICE_DECIMALS);
+      if (normalizedPrice <= 0n) throw new Error(`${tag} price must be positive`);
+      return normalizedPrice;
     } catch (err) {
       const e = new Error(`${tag} price query failed`, { cause: err });
       errors.push(e);
@@ -34,8 +38,9 @@ export async function getPrice(assetDecimals: number): Promise<bigint> {
   throw new AggregateError(errors, 'unable to fetch price from either source');
 }
 
-async function getFixedPrice(rawPrice: number, assetDecimals: number): Promise<bigint> {
-  const price = toAsset(rawPrice, assetDecimals);
+async function getFixedPrice(rawPrice: string): Promise<bigint> {
+  const price = toAsset(rawPrice, AJNA_PRICE_DECIMALS);
+  if (price <= 0n) throw new Error('fixed price must be positive');
   log.info({ event: 'keeper_price_fixed', rawPrice, price }, `using fixed price: ${price}`);
   return price;
 }

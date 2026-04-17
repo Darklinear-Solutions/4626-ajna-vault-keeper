@@ -337,13 +337,12 @@ async function optimalBucketHasCollateral(data: KeeperRunData): Promise<boolean>
 // ============= Data Fetching =============
 
 export async function _getKeeperData(): Promise<KeeperRunData> {
-  const assetDecimals = await vault.getAssetDecimals();
   const [initialBuckets, bufferTotal, lup, htp, price] = await Promise.all([
     vault.getBuckets(),
     vault.getBufferTotal(),
     vault.getLup(),
     vault.getHtp(),
-    getPrice(assetDecimals),
+    getPrice(),
   ]);
 
   for (let i = 0; i < initialBuckets.length; i++) {
