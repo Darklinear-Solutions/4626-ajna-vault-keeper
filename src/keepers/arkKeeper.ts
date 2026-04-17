@@ -110,7 +110,6 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
 
 async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
   await _refreshBufferValues(data);
-  if (data.bufferTarget === 0n) return;
 
   const difference = data.bufferTotal - data.bufferTarget;
   const abs = difference >= 0n ? difference : -difference;

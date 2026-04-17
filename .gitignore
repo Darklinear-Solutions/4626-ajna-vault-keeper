@@ -14,3 +14,7 @@ codeql-results.sarif
 config.json
 /keystore/
 .claude/settings.local.json
+audit/
+mewt.sqlite
+CLAUDE.md
+.supply-chain-risk-auditor/
