@@ -54,7 +54,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | `metavaultAddress`               | Address of the Euler Earn (metavault) contract. If omitted, only the ark keeper runs. | Ethereum address (`0x...`) | Optional                                   | None             |
     | `keeper.intervalMs`              | Interval between keeper runs.                                                    | Integer (milliseconds)   | Required                                       | 43,200,000 (12h) |
     | `keeper.logLevel`                | Minimum severity of logs (`info`, `warn`, `error`).                              | String                   | Optional                                       | `info`           |
-    | `keeper.exitOnSubgraphFailure`   | Abort run if the subgraph query fails during the check for bad debt in the pool. | Boolean                  | Optional                                       | `false`          |
+    | `keeper.exitOnSubgraphFailure`   | Abort run if the subgraph query fails during the check for bad debt in the pool. The default is fail-closed. Set this to `false` only if you explicitly prefer availability over the bad-debt guard during subgraph outages. | Boolean                  | Optional                                       | `true`           |
     | `keeper.haltIfLupBelowHtp`       | If operations trigger `LUPBelowHTP` error from Ajna, halt keeper until restarted to prevent more tokens from being added to the pool while move targets are likely to require liquidations. | Boolean | Required                      | N/A              |
     | `oracle.apiUrl`                  | API endpoint for off-chain price oracle using CoinGecko.                         | URL (`https://...`)      | Conditional (if on-chain oracle is not primary and no fixed price is set) | None |
     | `oracle.onchainPrimary`          | Use on-chain oracle as primary instead of CoinGecko.                             | Boolean                  | Required                                       | N/A              |
@@ -183,6 +183,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
           * `tx_success` - successful tx with hash, block, action (`move`, `moveToBuffer`, `moveFromBuffer`, `drain`, `reallocate`), amount, and from/to buckets.
       * Warnings:
           * `ark_run_halted` - emitted when the ark keeper is halted due to a `LUPBelowHTP` error. The keeper will not run again until the process is restarted.
+          * `subgraph_fail_open_enabled` - emitted at startup when `keeper.exitOnSubgraphFailure` is set to `false`, meaning subgraph query failures will be treated as if there are no auctions.
           * `oracle_staleness_check_disabled` - emitted at startup when the Chronicle stale-price check has been explicitly disabled with `oracle.onchainMaxStaleness: null`.
           * `oracle_fixed_price_enabled` - emitted at startup when `oracle.fixedPrice` is configured and the keeper will bypass live oracle reads.
           * `price_query_failed` - query failed for the first of the two configured price feeds.

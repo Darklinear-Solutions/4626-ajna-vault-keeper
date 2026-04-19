@@ -120,7 +120,7 @@ if (
   throw new Error('config.json: oracle.onchainMaxStaleness must be a positive integer or null');
 }
 
-raw.keeper.exitOnSubgraphFailure ??= false;
+raw.keeper.exitOnSubgraphFailure ??= true;
 raw.oracle.futureSkewTolerance ??= 120;
 raw.arkGlobal.bufferPadding ??= '100000000000000';
 raw.arkGlobal.minMoveAmount ??= '1000001';

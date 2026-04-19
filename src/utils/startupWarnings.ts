@@ -2,6 +2,15 @@ import { config } from './config';
 import { log } from './logger';
 
 export function logStartupWarnings(): void {
+  if (!config.keeper.exitOnSubgraphFailure) {
+    log.warn(
+      {
+        event: 'subgraph_fail_open_enabled',
+      },
+      'subgraph failure handling is fail-open: query failures will be treated as no auctions',
+    );
+  }
+
   if (config.oracle.onchainPrimary && config.oracle.onchainMaxStaleness == null) {
     log.warn(
       {

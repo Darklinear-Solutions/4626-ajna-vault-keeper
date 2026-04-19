@@ -6,7 +6,7 @@
   "keeper": {
     "intervalMs": 43200000,
     "logLevel": "warn",
-    "exitOnSubgraphFailure": false,
+    "exitOnSubgraphFailure": true,
     "haltIfLupBelowHtp": true
   },
 
