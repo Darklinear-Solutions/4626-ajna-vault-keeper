@@ -14,10 +14,10 @@ jobs:
     env:
       ORACLE_API_TIER: "demo"
       RPC_URL: "http://127.0.0.1:8545"
-      MAINNET_RPC_URL: ${{ secrets. MAINNET_RPC_URL }}
+      MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
       ORACLE_API_KEY: ${{ secrets.ORACLE_API_KEY }}
       PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-      SUBGRAPH_URL: ${{ secrets. SUBGRAPH_URL }}
+      SUBGRAPH_URL: ${{ secrets.SUBGRAPH_URL }}
       START_ANVIL: false
 
     strategy:
@@ -31,14 +31,14 @@ jobs:
           submodules: recursive
       
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@8789b3e21e6c11b2697f5eb56eddae542f746c10 # v1, currently v1.7.0
 
       - name: Install Foundry dependencies  
         run: forge install
 
-      - uses: pnpm/action-setup@v2
+      - uses: pnpm/action-setup@078e9d416474b29c0c387560859308974f7e9c53 # v6.0.1
         with:
-          version: 9
+          version: "10.33.0"
           run_install: false
       - uses: actions/setup-node@v4
         with:
