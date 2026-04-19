@@ -1,10 +1,18 @@
-import { createWalletClient, createPublicClient, http, publicActions, type Chain } from 'viem';
+import {
+  createWalletClient,
+  createPublicClient,
+  http,
+  publicActions,
+  type Account,
+  type Chain,
+} from 'viem';
 import * as allChains from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-import { env } from './env';
+import { credentialMode, env } from './env';
 import { config } from './config';
 import { log } from './logger';
 import { loadPrivateKeyFromKeystore } from './keystore';
+import { createRemoteSignerAccount } from './remoteSigner';
 
 const transport = process.env.TEST_ENV === 'true' ? 'http://127.0.0.1:8545' : env.RPC_URL;
 
@@ -33,9 +41,7 @@ function getChain(chainId: number): Chain {
 
 const targetChain = getChain(config.chainId);
 
-function buildClients(privateKey: `0x${string}`) {
-  const account = privateKeyToAccount(privateKey);
-
+function buildClients(account: Account) {
   const walletClient = createWalletClient({
     account,
     chain: targetChain,
@@ -55,21 +61,47 @@ type Clients = ReturnType<typeof buildClients>;
 export let client: Clients['walletClient'];
 export let readOnlyClient: Clients['publicClient'];
 
-if (env.PRIVATE_KEY) {
-  const built = buildClients(env.PRIVATE_KEY as `0x${string}`);
+function setClients(account: Account): void {
+  const built = buildClients(account);
   client = built.walletClient;
   readOnlyClient = built.publicClient;
+}
+
+function createImmediateAccount(): Account | null {
+  if (credentialMode === 'privateKey') {
+    return privateKeyToAccount(env.PRIVATE_KEY as `0x${string}`);
+  }
+
+  if (credentialMode === 'remoteSigner') {
+    return createRemoteSignerAccount({
+      address: env.REMOTE_SIGNER_ADDRESS as `0x${string}`,
+      url: env.REMOTE_SIGNER_URL!,
+    });
+  }
+
+  return null;
+}
+
+async function loadAccount(): Promise<Account> {
+  const immediateAccount = createImmediateAccount();
+  if (immediateAccount) return immediateAccount;
+
+  if (credentialMode === 'keystore') {
+    const privateKey = await loadPrivateKeyFromKeystore(env.KEYSTORE_PATH!);
+    return privateKeyToAccount(privateKey);
+  }
+
+  throw new Error(`Unsupported credential mode: ${credentialMode}`);
+}
+
+const immediateAccount = createImmediateAccount();
+
+if (immediateAccount) {
+  setClients(immediateAccount);
 }
 
 export async function initClient(): Promise<void> {
   if (client) return;
 
-  if (env.KEYSTORE_PATH) {
-    const privateKey = await loadPrivateKeyFromKeystore(env.KEYSTORE_PATH);
-    const built = buildClients(privateKey);
-    client = built.walletClient;
-    readOnlyClient = built.publicClient;
-  } else {
-    throw new Error('Either PRIVATE_KEY or KEYSTORE_PATH must be specified');
-  }
+  setClients(await loadAccount());
 }

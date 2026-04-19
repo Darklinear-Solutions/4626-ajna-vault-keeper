@@ -4,7 +4,7 @@ import { config } from './config.ts';
 export const log = pino(
   {
     level: config.keeper.logLevel ?? 'info',
-    redact: ['env.PRIVATE_KEY', 'env.ORACLE_API_KEY', 'env.RPC_URL'],
+    redact: ['env.PRIVATE_KEY', 'env.ORACLE_API_KEY', 'env.REMOTE_SIGNER_URL', 'env.RPC_URL'],
   },
   pino.destination({ sync: true }),
 );

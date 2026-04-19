@@ -39,11 +39,23 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
     | `RPC_URL`                        | RPC endpoint used for on-chain interactions.                                     | URL (`https://...`)      | Required                                       | None             |
     | `SUBGRAPH_URL`                   | Subgraph endpoint for pool/vault state queries.                                  | URL (`https://...`)      | Required                                       | None             |
-    | `PRIVATE_KEY`                    | Private key of the keeper's authorized account.                                  | Hex string (`0x...`)     | Conditional (one of `PRIVATE_KEY` or `KEYSTORE_PATH` required) | None             |
-    | `KEYSTORE_PATH`                  | Path to an Ethereum V3 keystore file. If set, the keeper prompts for the password on startup. | String (file path)       | Conditional (one of `PRIVATE_KEY` or `KEYSTORE_PATH` required) | None             |
+    | `PRIVATE_KEY`                    | Raw private key of the keeper's authorized account. Intended as a headless fallback when the deployer injects it from a secret manager. | Hex string (`0x...`)     | Conditional (exactly one credential mode must be configured) | None             |
+    | `KEYSTORE_PATH`                  | Path to an Ethereum V3 keystore file. If set, the keeper prompts for the password on startup. Best suited to local/operator use. | String (file path)       | Conditional (exactly one credential mode must be configured) | None             |
+    | `REMOTE_SIGNER_URL`              | Web3Signer-compatible JSON-RPC endpoint used only for signing transactions. Reads, fee estimation, waits, and broadcast still use `RPC_URL`. | URL (`https://...`)      | Conditional (`REMOTE_SIGNER_URL` and `REMOTE_SIGNER_ADDRESS` must be set together as one credential mode) | None             |
+    | `REMOTE_SIGNER_ADDRESS`          | EOA address exposed by the remote signer and used as `client.account.address`.   | Ethereum address (`0x...`) | Conditional (`REMOTE_SIGNER_URL` and `REMOTE_SIGNER_ADDRESS` must be set together as one credential mode) | None             |
     | `ORACLE_API_KEY`                 | CoinGecko API key.                                                               | String                   | Optional                                       | None             |
     | `ORACLE_API_TIER`                | CoinGecko tier (`demo`, `pro`).                                                  | String                   | Conditional (if `ORACLE_API_KEY` set)          | None             |
     | `MAINNET_RPC_URL`                | Since the RPC node defined here may refer to any chain, the test suite needs a mainnet RPC for set up. By default, the test suite uses the free node at 'https://eth.drpc.org', but this node is rate-limited, which may cause unexpected test failures. To avoid this, another RPC can be defined here. | String | Optional | None |
+
+    **Credential modes (mutually exclusive):**
+
+    | Mode | Variables | Recommended use |
+    | ---- | --------- | --------------- |
+    | Remote signer | `REMOTE_SIGNER_URL` + `REMOTE_SIGNER_ADDRESS` | Preferred production posture where available. The keeper talks to a Web3Signer-compatible signer service, so the signing key can stay externalized or non-extractable. |
+    | Local keystore | `KEYSTORE_PATH` | Local/operator mode. Startup is interactive: the keystore password is prompted on boot. |
+    | Raw private key | `PRIVATE_KEY` | Headless fallback when the deployer must inject the key directly from a secret manager. |
+
+    Remote signer mode is the strongest supported production posture in this repo. Direct AWS KMS integration is not implemented in the keeper itself, but AWS KMS, Vault, and similar custody systems can back a compatible signer service. The minimum expectation is a reachable Web3Signer-compatible JSON-RPC endpoint that signs for the EOA configured in `REMOTE_SIGNER_ADDRESS`. The signer endpoint should stay on a restricted internal network or equivalent access-controlled path, not on the public internet.
 
     **Config values (set in `config.json`):**
 
@@ -218,9 +230,9 @@ git submodule update --init --recursive
 pnpm build
 ```
 
-#### Import a private key to a keystore (optional):
+#### Import a private key to a keystore (local mode):
 
-As an alternative to defining `PRIVATE_KEY` directly in `.env`, a private key can be encrypted into an Ethereum V3 keystore file. This avoids storing the raw key on disk. To import:
+As an alternative to defining `PRIVATE_KEY` directly in `.env`, a private key can be encrypted into an Ethereum V3 keystore file. This avoids storing the raw key on disk for local environments. To import:
 
 ```
 pnpm import-key
@@ -262,7 +274,11 @@ For `.env`, define the required secrets:
 cp .env.example .env
 ```
 
-Then replace the placeholder values in `.env`. At minimum, `RPC_URL`, `SUBGRAPH_URL`, and either `PRIVATE_KEY` or `KEYSTORE_PATH` must be set.
+Then replace the placeholder values in `.env`. At minimum, `RPC_URL`, `SUBGRAPH_URL`, and exactly one credential mode must be set:
+
+- `PRIVATE_KEY`
+- `KEYSTORE_PATH`
+- `REMOTE_SIGNER_URL` with `REMOTE_SIGNER_ADDRESS`
 
 For `config.json`, start from the example:
 
@@ -272,7 +288,7 @@ cp config.example.json config.json
 
 Then fill in the required values. At minimum, `quoteTokenAddress`, `arks`, `buffer`, and oracle configuration must be set. If the metavault address is provided, the metavault keeper will run alongside the ark keeper. If omitted, only the ark keeper runs.
 
-In production, `.env` values should be provided at runtime from the deployment environment. The `config.json` file should be mounted or baked into the container.
+In production, `.env` values should be provided at runtime from the deployment environment. Prefer a remote signer when available. If you use a raw private key instead, inject it from the deployer's secret manager rather than baking it into images or committed files. The `config.json` file should be mounted or baked into the container.
 
 ## Run Tests
 
