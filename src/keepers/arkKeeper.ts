@@ -8,7 +8,7 @@ import { poolHasBadDebt } from '../subgraph/poolHealth';
 import { createVault } from '../ark/vault';
 import { type Address } from 'viem';
 
-let halted = false;
+const haltedArks = new Set<Address>();
 let vault: ReturnType<typeof createVault>;
 let _settings: ResolvedArkSettings;
 
@@ -47,7 +47,7 @@ export async function arkRun(
   vault = createVault(address, vaultAuthAddress);
   _settings = settings;
 
-  if (halted) return logRunExit('keeper halted');
+  if (isCurrentArkHalted()) return logRunExit('keeper halted');
   if (await vault.isPaused()) return logRunExit('vault is currently paused');
   if (await poolHasBadDebt(vault, _settings.maxAuctionAge)) return logRunExit('pool has bad debt');
 
@@ -83,6 +83,8 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
   let bufferNeeded = await _calculateBufferDeficit(data);
 
   for (let i = 0; i < data.buckets.length; i++) {
+    if (isCurrentArkHalted()) return;
+
     const bucket = data.buckets[i]!;
     await handleTransaction(vault.drain(bucket), {
       action: 'drain',
@@ -109,6 +111,8 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
 }
 
 async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
+  if (isCurrentArkHalted()) return;
+
   await _refreshBufferValues(data);
 
   const difference = data.bufferTotal - data.bufferTarget;
@@ -171,7 +175,7 @@ function planBucketOperations(
 // ============= Move Execution =============
 
 async function executeMoveOperation(op: MoveOperation): Promise<TransactionData | undefined> {
-  if (halted) return;
+  if (isCurrentArkHalted()) return;
   if (op.from === 'Buffer') {
     const gas = await getGasWithBuffer(
       'vault',
@@ -216,7 +220,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
 }
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
-  if (halted) return;
+  if (isCurrentArkHalted()) return;
   await handleTransaction(vault.drain(targetBucket), {
     action: 'drain',
     bucket: targetBucket,
@@ -237,10 +241,12 @@ async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promi
 }
 
 async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<void> {
-  if (halted) return;
+  if (isCurrentArkHalted()) return;
   let remaining = needed;
 
   for (let i = 0; i < data.buckets.length && remaining > data.minAmount; i++) {
+    if (isCurrentArkHalted()) return;
+
     const bucket = data.buckets[i]!;
     await handleTransaction(vault.drain(bucket), {
       action: 'drain',
@@ -266,6 +272,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       action: 'moveToBuffer',
       from: bucket,
       amount: amountToMove,
+      ark: vault.getAddress(),
     });
 
     if (txData?.status) remaining -= txData?.assets;
@@ -416,12 +423,23 @@ export function initArkKeeper(
   _settings = settings;
 }
 
-export function haltKeeper() {
-  halted = true;
+export function isArkHalted(address: Address): boolean {
+  return haltedArks.has(address);
+}
+
+export function haltKeeper(address?: Address) {
+  const ark = address ?? vault?.getAddress?.();
+  if (!ark || haltedArks.has(ark)) return;
+
+  haltedArks.add(ark);
   log.warn(
-    { event: 'ark_run_halted', ark: vault.getAddress() },
-    `ark run halting due to LUPBelowHTP error for ark ${vault.getAddress()}`,
+    { event: 'ark_run_halted', ark },
+    `ark run halting due to LUPBelowHTP error for ark ${ark}`,
   );
+}
+
+function isCurrentArkHalted(): boolean {
+  return isArkHalted(vault.getAddress());
 }
 
 // ============= Logging =============
