@@ -1,4 +1,5 @@
 import { type ResolvedArkSettings } from '../utils/config';
+import { config } from '../utils/config';
 import { log } from '../utils/logger';
 import { toWad } from '../utils/decimalConversion';
 import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
@@ -116,14 +117,17 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
   await _refreshBufferValues(data);
 
   const difference = data.bufferTotal - data.bufferTarget;
-  const abs = difference >= 0n ? difference : -difference;
-
-  if (abs <= _settings.bufferPadding + data.minAmount) return;
 
   if (difference > 0n) {
-    const amount = difference - _settings.bufferPadding;
+    const surplus = await _calculateBufferSurplus(data);
+    if (surplus <= _settings.bufferPadding + data.minAmount) return;
+
+    const amount = surplus - _settings.bufferPadding;
     await moveExcessFromBuffer(amount, data.optimalBucket);
   } else {
+    const deficit = -difference;
+    if (deficit <= _settings.bufferPadding + data.minAmount) return;
+
     const amount = await poolBalanceCap(-difference - _settings.bufferPadding, vault);
     await fillBufferDeficit(amount, data);
   }
@@ -403,6 +407,36 @@ async function _calculateBufferDeficit(data: KeeperRunData): Promise<bigint> {
   if (data.bufferTotal >= data.bufferTarget) return 0n;
 
   return deficit > _settings.bufferPadding ? deficit - _settings.bufferPadding : 0n;
+}
+
+async function _calculateBufferSurplus(data: KeeperRunData): Promise<bigint> {
+  if (data.bufferTotal <= data.bufferTarget) return 0n;
+
+  const bufferRatio = await vault.getBufferRatio();
+  if (bufferRatio !== 0n) return data.bufferTotal - data.bufferTarget;
+
+  const reservedBuffer = await _calculateReservedExternalBuffer();
+  if (data.bufferTotal <= reservedBuffer) return 0n;
+
+  return data.bufferTotal - reservedBuffer;
+}
+
+async function _calculateReservedExternalBuffer(): Promise<bigint> {
+  if (!config.metavaultAddress) return 0n;
+
+  const [totalSupply, metavaultShares] = await Promise.all([
+    vault.getTotalSupply(),
+    vault.getBalanceOf(config.metavaultAddress),
+  ]);
+  const externalShares = totalSupply > metavaultShares ? totalSupply - metavaultShares : 0n;
+  if (externalShares === 0n) return 0n;
+
+  const [externalAssets, assetDecimals] = await Promise.all([
+    vault.convertToAssets(externalShares),
+    vault.getAssetDecimals(),
+  ]);
+
+  return toWad(externalAssets, assetDecimals);
 }
 
 async function _refreshBufferValues(data: KeeperRunData) {
