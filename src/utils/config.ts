@@ -36,7 +36,7 @@ type RawConfig = {
     apiUrl?: string;
     onchainPrimary: boolean;
     onchainAddress?: string;
-    onchainMaxStaleness: number | null;
+    onchainMaxStaleness?: number | null;
     fixedPrice: string | null;
     futureSkewTolerance?: number;
   };
@@ -64,6 +64,8 @@ type RawConfig = {
 };
 
 // ============= Parse & Validate =============
+
+export const DEFAULT_ONCHAIN_MAX_STALENESS = 86400;
 
 const raw: RawConfig = JSON.parse(readFileSync(join(process.cwd(), 'config.json'), 'utf-8'));
 
@@ -105,6 +107,17 @@ if (!raw.oracle.onchainPrimary && raw.oracle.fixedPrice == null) {
 
 if (raw.oracle.onchainPrimary && !raw.oracle.onchainAddress) {
   throw new Error('config.json: oracle.onchainAddress is required when onchainPrimary is true');
+}
+
+if (raw.oracle.onchainMaxStaleness === undefined) {
+  raw.oracle.onchainMaxStaleness = raw.oracle.onchainPrimary ? DEFAULT_ONCHAIN_MAX_STALENESS : null;
+}
+
+if (
+  raw.oracle.onchainMaxStaleness != null &&
+  (!Number.isInteger(raw.oracle.onchainMaxStaleness) || raw.oracle.onchainMaxStaleness <= 0)
+) {
+  throw new Error('config.json: oracle.onchainMaxStaleness must be a positive integer or null');
 }
 
 raw.keeper.exitOnSubgraphFailure ??= false;

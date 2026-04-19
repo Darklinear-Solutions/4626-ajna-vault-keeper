@@ -1,0 +1,104 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+afterEach(() => {
+  vi.resetModules();
+  vi.doUnmock('fs');
+});
+
+describe('config onchainMaxStaleness handling', () => {
+  it('defaults onchainMaxStaleness when onchainPrimary is enabled and the field is omitted', async () => {
+    vi.doMock('fs', () => ({
+      readFileSync: () => `{
+        "chainId": 1,
+        "quoteTokenAddress": "0x1",
+        "keeper": {
+          "intervalMs": 1,
+          "haltIfLupBelowHtp": true
+        },
+        "oracle": {
+          "onchainPrimary": true,
+          "onchainAddress": "0x2",
+          "fixedPrice": null
+        },
+        "arkGlobal": {},
+        "transaction": {
+          "confirmations": 1
+        },
+        "arks": [],
+        "buffer": {
+          "address": "0x3",
+          "allocation": 0
+        },
+        "minRateDiff": 10
+      }`,
+    }));
+
+    const { config } = await import('../../src/utils/config.ts');
+    expect(config.oracle.onchainMaxStaleness).toBe(86400);
+  });
+
+  it('preserves an explicit null staleness override', async () => {
+    vi.doMock('fs', () => ({
+      readFileSync: () => `{
+        "chainId": 1,
+        "quoteTokenAddress": "0x1",
+        "keeper": {
+          "intervalMs": 1,
+          "haltIfLupBelowHtp": true
+        },
+        "oracle": {
+          "onchainPrimary": true,
+          "onchainAddress": "0x2",
+          "onchainMaxStaleness": null,
+          "fixedPrice": null
+        },
+        "arkGlobal": {},
+        "transaction": {
+          "confirmations": 1
+        },
+        "arks": [],
+        "buffer": {
+          "address": "0x3",
+          "allocation": 0
+        },
+        "minRateDiff": 10
+      }`,
+    }));
+
+    const { config } = await import('../../src/utils/config.ts');
+    expect(config.oracle.onchainMaxStaleness).toBeNull();
+  });
+
+  it('rejects non-positive onchainMaxStaleness values', async () => {
+    vi.doMock('fs', () => ({
+      readFileSync: () => `{
+        "chainId": 1,
+        "quoteTokenAddress": "0x1",
+        "keeper": {
+          "intervalMs": 1,
+          "haltIfLupBelowHtp": true
+        },
+        "oracle": {
+          "onchainPrimary": true,
+          "onchainAddress": "0x2",
+          "onchainMaxStaleness": 0,
+          "fixedPrice": null
+        },
+        "arkGlobal": {},
+        "transaction": {
+          "confirmations": 1
+        },
+        "arks": [],
+        "buffer": {
+          "address": "0x3",
+          "allocation": 0
+        },
+        "minRateDiff": 10
+      }`,
+    }));
+
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow(
+      'config.json: oracle.onchainMaxStaleness must be a positive integer or null',
+    );
+  });
+});
