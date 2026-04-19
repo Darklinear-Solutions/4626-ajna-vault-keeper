@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { setUpCrashHandlers } from './utils/logger';
 import { logStartupWarnings } from './utils/startupWarnings';
 import { initClient } from './utils/client';

@@ -1,5 +1,5 @@
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import type { Address } from 'viem';
 import { toAsset } from './decimalConversion.ts';
 
@@ -67,7 +67,23 @@ type RawConfig = {
 
 export const DEFAULT_ONCHAIN_MAX_STALENESS = 86400;
 
-const raw: RawConfig = JSON.parse(readFileSync(join(process.cwd(), 'config.json'), 'utf-8'));
+const CONFIG_PATH = process.env.CONFIG_PATH
+  ? resolve(process.env.CONFIG_PATH)
+  : join(process.cwd(), 'config.json');
+
+let raw: RawConfig;
+
+try {
+  raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+} catch (error) {
+  if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+    throw new Error(
+      `Configuration file not found at ${CONFIG_PATH}. Set CONFIG_PATH or place config.json in the working directory.`,
+    );
+  }
+
+  throw error;
+}
 
 for (const [i, ark] of raw.arks.entries()) {
   if (ark.allocation.max === 0)

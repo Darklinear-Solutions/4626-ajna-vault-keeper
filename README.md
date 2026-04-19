@@ -39,6 +39,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
     | `RPC_URL`                        | RPC endpoint used for on-chain interactions.                                     | URL (`https://...`)      | Required                                       | None             |
     | `SUBGRAPH_URL`                   | Subgraph endpoint for pool/vault state queries.                                  | URL (`https://...`)      | Required                                       | None             |
+    | `CONFIG_PATH`                    | Optional path to the runtime `config.json` file. Useful when the config is mounted somewhere other than the working directory, such as inside a container. | String (file path)       | Optional                                       | `./config.json`  |
     | `PRIVATE_KEY`                    | Raw private key of the keeper's authorized account. Intended as a headless fallback when the deployer injects it from a secret manager. | Hex string (`0x...`)     | Conditional (exactly one credential mode must be configured) | None             |
     | `KEYSTORE_PATH`                  | Path to an Ethereum V3 keystore file. If set, the keeper prompts for the password on startup. Best suited to local/operator use. | String (file path)       | Conditional (exactly one credential mode must be configured) | None             |
     | `REMOTE_SIGNER_URL`              | Web3Signer-compatible JSON-RPC endpoint used only for signing transactions. Reads, fee estimation, waits, and broadcast still use `RPC_URL`. | URL (`https://...`)      | Conditional (`REMOTE_SIGNER_URL` and `REMOTE_SIGNER_ADDRESS` must be set together as one credential mode) | None             |
@@ -242,27 +243,52 @@ This will prompt for the private key and a password, then write the encrypted ke
 
 #### Docker:
 
-If using Docker, the above steps can be skipped. Instead, build locally with:
+The Docker image only contains the compiled keeper and its production dependencies. It does not bake `.env` or `config.json` into build layers or the final runtime image.
+
+Build the image with:
 
 ```
-pnpm docker:build:local
+pnpm docker:build
 ```
 
-Or build for production using:
+Then run it by injecting environment variables at runtime and mounting the keeper config:
 
 ```
-pnpm docker:build:prod
+pnpm docker:run
 ```
 
-Note that local builds inject `.env`, while production builds expect environment variables to be provided at runtime.
-
-After building, run the keeper locally with:
+Equivalent explicit `docker run` command:
 
 ```
-pnpm docker:run:local
+docker run --rm \
+  --env-file .env \
+  -v "$PWD/config.json:/app/config.json:ro" \
+  ajna-erc4626-keeper
 ```
 
-There is no default script for using Docker to run the keeper in production, since this is likely to be environment-specific.
+If you mount the config somewhere else, set `CONFIG_PATH` to the in-container path:
+
+```
+docker run --rm \
+  --env-file .env \
+  -e CONFIG_PATH=/config/keeper.json \
+  -v "$PWD/config.json:/config/keeper.json:ro" \
+  ajna-erc4626-keeper
+```
+
+If you use `KEYSTORE_PATH`, mount that file too and set `KEYSTORE_PATH` to the container path. For example:
+
+```
+docker run --rm \
+  --env-file .env \
+  -e KEYSTORE_PATH=/secrets/keeper-key.json \
+  -v "$PWD/config.json:/app/config.json:ro" \
+  -v "$PWD/keystore/keeper-key.json:/secrets/keeper-key.json:ro" \
+  -it \
+  ajna-erc4626-keeper
+```
+
+Prefer `REMOTE_SIGNER_URL` plus `REMOTE_SIGNER_ADDRESS` for production deployments where possible. If you use `PRIVATE_KEY`, inject it at runtime from the deployment environment or secret manager rather than baking it into an image.
 
 ## Configure Environment
 
@@ -280,15 +306,17 @@ Then replace the placeholder values in `.env`. At minimum, `RPC_URL`, `SUBGRAPH_
 - `KEYSTORE_PATH`
 - `REMOTE_SIGNER_URL` with `REMOTE_SIGNER_ADDRESS`
 
+`CONFIG_PATH` is optional. Leave it unset when `config.json` will live in the current working directory. Set it when a container or deployment mounts the file elsewhere.
+
 For `config.json`, start from the example:
 
 ```
 cp config.example.json config.json
 ```
 
-Then fill in the required values. At minimum, `quoteTokenAddress`, `arks`, `buffer`, and oracle configuration must be set. If the metavault address is provided, the metavault keeper will run alongside the ark keeper. If omitted, only the ark keeper runs.
+Then fill in the placeholder addresses and any environment-specific settings. At minimum, `quoteTokenAddress`, `arks`, `buffer`, and oracle configuration must be set. If the metavault address is provided, the metavault keeper will run alongside the ark keeper. If omitted, only the ark keeper runs.
 
-In production, `.env` values should be provided at runtime from the deployment environment. Prefer a remote signer when available. If you use a raw private key instead, inject it from the deployer's secret manager rather than baking it into images or committed files. The `config.json` file should be mounted or baked into the container.
+In production, `.env` values should be provided at runtime from the deployment environment. Prefer a remote signer when available. If you use a raw private key instead, inject it from the deployer's secret manager rather than baking it into images or committed files. The default Docker image expects `config.json` to be mounted at runtime, though you can also bake it into a derivative image if your deployment process requires that.
 
 ## Run Tests
 
