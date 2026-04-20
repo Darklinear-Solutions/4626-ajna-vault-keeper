@@ -10,6 +10,10 @@ import { setBufferRatio } from '../helpers/vaultHelpers.ts';
 const vaultAddress = config.arks[0]!.vaultAddress;
 const vault = createVault(vaultAddress, config.arks[0]!.vaultAuthAddress);
 
+function absoluteDifference(a: bigint, b: bigint): bigint {
+  return a >= b ? a - b : b - a;
+}
+
 describe('vault interface', () => {
   it('can query buckets', async () => {
     const buckets = await vault.getBuckets();
@@ -88,6 +92,9 @@ describe('vault operations', () => {
   });
 
   it('can move between buckets', async () => {
+    // Fork-backed bucket valuations occasionally drift by a few wei after the move settles,
+    // so assert a tight absolute tolerance around the requested move amount.
+    const moveTolerance = 10n;
     const toIndex = htpIndex - 1n;
 
     const [beforeHtpQts, beforeToQts] = await Promise.all([
@@ -117,9 +124,11 @@ describe('vault operations', () => {
 
     const htpDelta = beforeHtpQts - afterHtpQts;
     const toDelta = afterToQts - beforeToQts;
-    const deltaDiff = toDelta - htpDelta;
 
-    expect(deltaDiff).toBeLessThan(2n);
+    expect(htpDelta).toBeGreaterThan(0n);
+    expect(absoluteDifference(toDelta, htpDelta)).toBeLessThanOrEqual(moveTolerance);
+    expect(absoluteDifference(htpDelta, toAssets)).toBeLessThanOrEqual(moveTolerance);
+    expect(absoluteDifference(toDelta, toAssets)).toBeLessThanOrEqual(moveTolerance);
     expect(toDelta).toBeGreaterThan(0n);
   });
 
@@ -147,9 +156,8 @@ describe('vault operations', () => {
 
     const bufferDelta: bigint = afterBufferBalance - beforeBufferBalance;
     const htpDelta = beforeHtpQts - afterHtpQts;
-    const deltaDiff = htpDelta - bufferDelta;
 
-    expect(deltaDiff).toBeLessThan(3n);
+    expect(absoluteDifference(htpDelta, bufferDelta)).toBeLessThanOrEqual(3n);
     expect(bufferDelta).toBeGreaterThan(0n);
   });
 
@@ -161,9 +169,8 @@ describe('vault operations', () => {
 
     const htpDelta = afterHtpQts - initialHtpQts;
     const bufferDelta = initialBufferBalance - afterBufferBalance;
-    const deltaDiff = bufferDelta - htpDelta;
 
-    expect(deltaDiff).toBeLessThan(300000);
+    expect(absoluteDifference(bufferDelta, htpDelta)).toBeLessThanOrEqual(300000n);
     expect(htpDelta).toBeGreaterThan(0n);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { selectBuckets } from '../../../src/ark/utils/selectBuckets';
+import { _wouldLeaveDust, selectBuckets } from '../../../src/ark/utils/selectBuckets';
 import { type createVault } from '../../../src/ark/vault';
 
 type Vault = ReturnType<typeof createVault>;
@@ -172,6 +172,25 @@ describe('selectBuckets', () => {
       ]);
     });
 
+    it('takes the full final fallback bucket when a partial move would leave dust', async () => {
+      // No single bucket can satisfy 100*S on its own.
+      // Greedy fallback takes bucket 100 first (70*S), leaving 30*S.
+      // Taking only 30*S from bucket 200 would leave 909_091 LPs behind, so the full 55*S
+      // bucket should be selected instead of a partial final withdrawal.
+      const vault = makeVault(
+        [100n, 200n, 300n],
+        { '100': 70n * S, '200': 55n * S, '300': 20n * S },
+        { '100': 1000n, '200': 900n, '300': 800n },
+        { '100': 70n * S, '200': 2n * S, '300': 20n * S },
+      );
+
+      const result = await selectBuckets(vault, 100n * S);
+      expect(result).toEqual([
+        { bucket: 100n, amount: 70n * S },
+        { bucket: 200n, amount: 55n * S },
+      ]);
+    });
+
     it('does not adjust when remaining LPs are at dust threshold', async () => {
       // Bucket has value and LPs such that remaining LPs = exactly DUST.
       // value = (DUST + 199*S), lps = (DUST + 199*S). We want 199*S.
@@ -205,5 +224,16 @@ describe('selectBuckets', () => {
       const result = await selectBuckets(vault, 99n * S);
       expect(result).toEqual([{ bucket: 100n, amount: 100n * S }]);
     });
+  });
+});
+
+describe('_wouldLeaveDust', () => {
+  it('returns false when the requested amount is equal to or greater than the bucket value', () => {
+    expect(_wouldLeaveDust(100n, 100n, 100n, 10n)).toBe(false);
+    expect(_wouldLeaveDust(101n, 100n, 100n, 10n)).toBe(false);
+  });
+
+  it('returns true when a partial withdrawal would leave LPs below the dust threshold', () => {
+    expect(_wouldLeaveDust(99n, 100n, 100n, 2n)).toBe(true);
   });
 });

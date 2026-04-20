@@ -60,7 +60,7 @@ export async function selectBuckets(
   return moves;
 }
 
-function _wouldLeaveDust(
+export function _wouldLeaveDust(
   amount: bigint,
   bucketValue: bigint,
   bucketLps: bigint,
