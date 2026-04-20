@@ -1,5 +1,5 @@
-import { config } from '../../utils/config';
-import { type Ark } from '../../keepers/metavaultKeeper';
+import { config } from '../../utils/config.ts';
+import { type Ark } from '../../keepers/metavaultKeeper.ts';
 import { type Address } from 'viem';
 
 export type ArkEvaluation = {

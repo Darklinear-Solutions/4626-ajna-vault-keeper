@@ -1,12 +1,12 @@
-import { type ResolvedArkSettings } from '../utils/config';
-import { config } from '../utils/config';
-import { log } from '../utils/logger';
-import { toWad } from '../utils/decimalConversion';
-import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
-import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction';
-import { getPrice } from '../oracle/price';
-import { poolHasBadDebt } from '../subgraph/poolHealth';
-import { createVault } from '../ark/vault';
+import { type ResolvedArkSettings } from '../utils/config.ts';
+import { config } from '../utils/config.ts';
+import { log } from '../utils/logger.ts';
+import { toWad } from '../utils/decimalConversion.ts';
+import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
+import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction.ts';
+import { getPrice } from '../oracle/price.ts';
+import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
+import { createVault } from '../ark/vault.ts';
 import { type Address } from 'viem';
 
 const haltedArks = new Set<Address>();

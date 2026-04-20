@@ -8,11 +8,11 @@ import {
 } from 'viem';
 import * as allChains from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-import { credentialMode, env } from './env';
-import { config } from './config';
-import { log } from './logger';
-import { loadPrivateKeyFromKeystore } from './keystore';
-import { createRemoteSignerAccount } from './remoteSigner';
+import { credentialMode, env } from './env.ts';
+import { config } from './config.ts';
+import { log } from './logger.ts';
+import { loadPrivateKeyFromKeystore } from './keystore.ts';
+import { createRemoteSignerAccount } from './remoteSigner.ts';
 
 const transport = process.env.TEST_ENV === 'true' ? 'http://127.0.0.1:8545' : env.RPC_URL;
 
@@ -87,8 +87,17 @@ async function loadAccount(): Promise<Account> {
   if (immediateAccount) return immediateAccount;
 
   if (credentialMode === 'keystore') {
+    log.info(
+      { event: 'keystore_load', path: env.KEYSTORE_PATH },
+      'Loading private key from keystore',
+    );
     const privateKey = await loadPrivateKeyFromKeystore(env.KEYSTORE_PATH!);
-    return privateKeyToAccount(privateKey);
+    const account = privateKeyToAccount(privateKey);
+    log.info(
+      { event: 'keystore_decrypted', address: account.address },
+      'Keystore decrypted successfully',
+    );
+    return account;
   }
 
   throw new Error(`Unsupported credential mode: ${credentialMode}`);

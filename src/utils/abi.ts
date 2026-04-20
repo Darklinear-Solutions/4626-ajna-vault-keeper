@@ -1,8 +1,8 @@
-import { vaultAbi } from '../abi/Vault';
+import { vaultAbi } from '../abi/Vault.ts';
 import { bufferAbi } from '../abi/Buffer.ts';
-import { chronicleAbi } from '../abi/Chronicle';
-import { poolInfoUtilsAbi } from '../abi/PoolInfoUtils';
-import { vaultAuthAbi } from '../abi/VaultAuth';
+import { chronicleAbi } from '../abi/Chronicle.ts';
+import { poolInfoUtilsAbi } from '../abi/PoolInfoUtils.ts';
+import { vaultAuthAbi } from '../abi/VaultAuth.ts';
 import { poolAbi } from '../abi/Pool.ts';
 import { eulerEarnAbi } from '../abi/EulerEarn.ts';
 import { mockVaultAbi } from '../abi/mock/MockVault.ts';

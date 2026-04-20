@@ -1,7 +1,7 @@
 import { getContract, type Address } from 'viem';
-import { client } from './client';
-import { getAbi, type ContractAbiKey } from './abi';
-import { getAddress, type ContractAddressKey } from './address';
+import { client } from './client.ts';
+import { getAbi, type ContractAbiKey } from './abi.ts';
+import { getAddress, type ContractAddressKey } from './address.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 

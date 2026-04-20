@@ -1,17 +1,17 @@
-import { config, resolveArkSettings } from '../utils/config';
-import { createVault } from '../ark/vault';
-import { evaluateRates, type ArkEvaluation } from '../metavault/utils/evaluateRates';
+import { config, resolveArkSettings } from '../utils/config.ts';
+import { createVault } from '../ark/vault.ts';
+import { evaluateRates, type ArkEvaluation } from '../metavault/utils/evaluateRates.ts';
 import {
   getExpectedSupplyAssets,
   getTotalExpectedSupplyAssets,
   reallocate,
   type MarketAllocation,
-} from '../metavault/metavault';
-import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
-import { poolHasBadDebt } from '../subgraph/poolHealth';
-import { log } from '../utils/logger';
-import { handleTransaction, getGasWithBuffer } from '../utils/transaction';
-import { selectBuckets } from '../ark/utils/selectBuckets';
+} from '../metavault/metavault.ts';
+import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
+import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
+import { log } from '../utils/logger.ts';
+import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
+import { selectBuckets } from '../ark/utils/selectBuckets.ts';
 import { type Address, maxUint256 } from 'viem';
 
 // ============= Types =============

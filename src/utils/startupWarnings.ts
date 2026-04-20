@@ -1,5 +1,5 @@
-import { config } from './config';
-import { log } from './logger';
+import { config } from './config.ts';
+import { log } from './logger.ts';
 
 export function logStartupWarnings(): void {
   if (!config.keeper.exitOnSubgraphFailure) {

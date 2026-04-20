@@ -1,8 +1,8 @@
-import { getAbi } from '../utils/abi';
-import { getAddress } from '../utils/address';
-import { client, readOnlyClient } from '../utils/client';
-import { config } from '../utils/config';
-import { log } from '../utils/logger';
+import { getAbi } from '../utils/abi.ts';
+import { getAddress } from '../utils/address.ts';
+import { client, readOnlyClient } from '../utils/client.ts';
+import { config } from '../utils/config.ts';
+import { log } from '../utils/logger.ts';
 import type { Address } from 'viem';
 
 type OracleData = readonly [bigint, bigint];

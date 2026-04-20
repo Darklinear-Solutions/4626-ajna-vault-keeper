@@ -1,6 +1,7 @@
 .vscode/
 node_modules/
 dist/
+dist-tools/
 .DS_Store
 .env*
 !.env.example

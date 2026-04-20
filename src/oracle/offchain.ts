@@ -1,5 +1,5 @@
-import { env } from '../utils/env';
-import { config } from '../utils/config';
+import { env } from '../utils/env.ts';
+import { config } from '../utils/config.ts';
 
 const tier = env.ORACLE_API_TIER ?? 'none';
 const key = env.ORACLE_API_KEY ?? '';

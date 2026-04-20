@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { contract } from '../utils/contract';
+import { contract } from '../utils/contract.ts';
 
 export function createVaultAuth(address: Address) {
   const vaultAuth = contract('vaultAuth', address);

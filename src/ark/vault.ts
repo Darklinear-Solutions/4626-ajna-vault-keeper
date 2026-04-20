@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Address } from 'viem';
-import { contract } from '../utils/contract';
+import { contract } from '../utils/contract.ts';
 
 const buffer = (bufferAddress: Address) => contract('buffer', bufferAddress);
 

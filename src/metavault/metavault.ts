@@ -1,4 +1,4 @@
-import { contract } from '../utils/contract';
+import { contract } from '../utils/contract.ts';
 import { type Address } from 'viem';
 
 export type MarketAllocation = {

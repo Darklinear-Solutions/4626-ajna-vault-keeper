@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { config } from './config';
+import { config } from './config.ts';
 
 type StaticTuple = readonly [string | undefined, string | undefined];
 

@@ -1,4 +1,4 @@
-import { type createVault } from '../vault';
+import { type createVault } from '../vault.ts';
 
 export type BucketMove = {
   bucket: bigint;

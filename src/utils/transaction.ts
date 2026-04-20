@@ -1,10 +1,10 @@
-import { log } from './logger';
-import { client } from './client';
-import { config } from './config';
-import { getAddress, type contracts } from './address';
-import { getAbi, type ContractAbiKey } from './abi';
-import { decodeAjnaError } from '../ajna/utils/decodeAjnaError';
-import { haltKeeper } from '../keepers/arkKeeper';
+import { log } from './logger.ts';
+import { client } from './client.ts';
+import { config } from './config.ts';
+import { getAddress, type contracts } from './address.ts';
+import { getAbi, type ContractAbiKey } from './abi.ts';
+import { decodeAjnaError } from '../ajna/utils/decodeAjnaError.ts';
+import { haltKeeper } from '../keepers/arkKeeper.ts';
 import {
   parseEventLogs,
   decodeErrorResult,
