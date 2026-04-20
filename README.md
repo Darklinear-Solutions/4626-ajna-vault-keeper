@@ -1,26 +1,46 @@
 # 4626 Ajna Vault Keeper
 
-## Overview
+## Table of Contents
 
-The Ajna vault keeper is a permissioned off-chain agent that manages an ERC-4626 vault system built on the Ajna lending protocol. It runs two keepers on a shared interval. The metavault keeper allocates capital across multiple Ajna vaults (called "arks") through an Euler Earn contract, rebalancing based on borrow fee rates and configured allocation limits. The ark keeper then runs for each individual ark, moving quote tokens between Ajna buckets and the Buffer based on bucket price (derived from market price) and vault policy. Together, these keepers channel liquidity toward optimal yield at both the cross-vault and intra-pool levels within predefined bounds. Both keepers are authorised in their respective contracts, run on a fixed interval and follow strict bail-out conditions to avoid unsafe actions.
+- [Overview](#overview)
+- [Why it Exists](#why-it-exists)
+- [What it Does](#what-it-does)
+- [In-Range Boundaries in Ajna](#in-range-boundaries-in-ajna)
+- [Technical Overview](#technical-overview)
+  - [1. Configuration](#technical-overview-1-configuration)
+  - [2. Fetching State](#technical-overview-2-fetching-state)
+  - [3. Early Fail or Skip Conditions](#technical-overview-3-early-fail-or-skip-conditions)
+  - [4. Compute Targets](#technical-overview-4-compute-targets)
+  - [5. Execute Rebalancing](#technical-overview-5-execute-rebalancing)
+  - [6. Housekeeping and Telemetry](#technical-overview-6-housekeeping-and-telemetry)
+- [Local Set Up](#local-set-up)
+- [Configure Environment](#configure-environment)
+- [Deployment Requirements](#deployment-requirements)
+- [Operator Responsibilities](#operator-responsibilities)
+- [Failure and Recovery](#failure-and-recovery)
+- [Run Tests](#run-tests)
 
-## Why it Exists
+## <a name="overview"></a>Overview
+
+The Ajna vault keeper is a permissioned offchain agent that manages an ERC-4626 vault system built on the Ajna lending protocol. It runs two keepers on a shared interval. The metavault keeper allocates capital across multiple Ajna vaults, referred to here as ARKs, through an Euler Earn contract, rebalancing based on borrow fee rates and configured allocation limits. The ARK keeper then runs for each individual ARK, moving quote tokens between Ajna buckets and the Buffer based on bucket price derived from market price and vault policy. Together, these keepers channel liquidity toward optimal yield at both the cross-vault and intra-pool levels within predefined bounds. Both keepers are authorised in their respective contracts, run on a fixed interval and follow strict bail-out conditions to avoid unsafe actions.
+
+## <a name="why-it-exists"></a>Why it Exists
 
 - Allocate capital across multiple Ajna vaults based on borrow fee rates.
-- Maintain configured allocation bounds (min/max per ark, buffer target) at the metavault level.
-- Maintain a configured Buffer ratio for fast withdrawals at the ark level.
-- Consolidate liquidity toward an optimal yielding bucket within each ark.
+- Maintain configured allocation bounds (min/max per ARK, buffer target) at the metavault level.
+- Maintain a configured Buffer ratio for fast withdrawals at the ARK level.
+- Consolidate liquidity toward an optimal yielding bucket within each ARK.
 - Skip actions when the vault or pool is not in a healthy state (paused, bad debt, out-of-range or dusty).
 
-## What it Does
+## <a name="what-it-does"></a>What it Does
 
-On each run, the keeper checks whether a metavault is configured. If so, the metavault keeper runs first, followed by the ark keeper for each configured ark. The metavault keeper can also be omitted entirely by leaving the metavault address out of the config, in which case only the ark keeper runs.
+On each run, the keeper checks whether a metavault is configured. If so, the metavault keeper runs first, followed by the ARK keeper for each configured ARK. The metavault keeper can also be omitted entirely by leaving the metavault address out of the config, in which case only the ARK keeper runs.
 
-**Metavault keeper:** Reads the current balance and borrow fee rate for each ark, then determines whether any reallocation is needed. It first enforces allocation bounds by capping arks that exceed their maximum and filling or draining the buffer to its target percentage. It then evaluates rates across arks and moves capital from lower-rate arks to higher-rate arks when the rate difference exceeds a configured threshold (`minRateDiff`). For any ark whose allocation needs to decrease, the metavault keeper executes on-chain `drain` and `moveToBuffer` calls to free funds from the appropriate buckets. Finally, it builds a set of ordered allocations and calls `reallocate()` on the Euler Earn contract.
+**Metavault keeper:** Reads the current balance and borrow fee rate for each ARK, then determines whether any reallocation is needed. It first enforces allocation bounds by capping ARKs that exceed their maximum and filling or draining the buffer to its target percentage. It then evaluates rates across ARKs and moves capital from lower-rate ARKs to higher-rate ARKs when the rate difference exceeds a configured threshold (`minRateDiff`). For any ARK whose allocation needs to decrease, the metavault keeper executes onchain `drain` and `moveToBuffer` calls to free funds from the appropriate buckets. Finally, it builds a set of ordered allocations and calls `reallocate()` on the Euler Earn contract.
 
-**Ark keeper:** For each ark, the keeper executes a full decision tree - fetching vault, pool, and buffer state, then it decides whether to continue by checking whether the vault is paused, if the pool has bad debt, and if the optimal bucket is out of range or dusty. If all of these are false, it computes the buffer deficit or surplus targets, as well as the optimal bucket pricing, and executes a rebalancing between buckets, to the buffer or from the buffer as needed. The keeper then concludes with a logging of results for transparency.
+**ARK keeper:** For each ARK, the keeper executes a full decision tree, fetching vault, pool, and buffer state, then deciding whether to continue by checking whether the vault is paused, if the pool has bad debt, and if the optimal bucket is out of range or dusty. If all of these are false, it computes the buffer deficit or surplus targets, as well as the optimal bucket pricing, and executes rebalancing between buckets and the buffer as needed. The keeper then concludes with logging of results for transparency.
 
-## In-Range Boundaries in Ajna
+## <a name="in-range-boundaries-in-ajna"></a>In-Range Boundaries in Ajna
 
 In Ajna, all deposits above the Lowest Utilized Price (LUP) or the Threshold Price of the least collateralized loan, known as the Highest Threshold Price (HTP), earn interest, while deposits below earn no interest. A pool's LUP is defined as the lowest collateral price against which someone is actively borrowing. Therefore, when a bucket is referred to as "in-range", it means that it lies within the band of the Ajna pool where deposits actively earn interest and are considered valid for allocation. Expanding upon the boundary limits:
 * The lower boundary is defined as the lowest price between the HTP and the LUP - typically the HTP beyond which, deposits will not be earning interest and need to be moved to a bucket in range.
@@ -29,15 +49,15 @@ In Ajna, all deposits above the Lowest Utilized Price (LUP) or the Threshold Pri
 
 Due to LUP and HTP shifting dynamically with pool activity, the in-range boundaries may not be static and as such a target bucket may shift in or out of range over time, which the keeper needs to monitor.
 
-## Technical Overview
+## <a name="technical-overview"></a>Technical Overview
 
-1. Configuration is split between `.env` (secrets and infrastructure) and `config.json` (operational parameters). Secrets stay in `.env` and should never be committed. All other configuration lives in `config.json`.
+1. <a name="technical-overview-1-configuration"></a>Configuration is split between `.env` (secrets and infrastructure) and `config.json` (operational parameters). Secrets stay in `.env` and should never be committed. All other configuration lives in `config.json`.
 
     **Environment variables (set in `.env`):**
 
     | Variable                         | Description                                                                      | Type                     | Required/Optional                              | Default          |
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
-    | `RPC_URL`                        | RPC endpoint used for on-chain interactions.                                     | URL (`https://...`)      | Required                                       | None             |
+    | `RPC_URL`                        | RPC endpoint used for onchain interactions.                                      | URL (`https://...`)      | Required                                       | None             |
     | `SUBGRAPH_URL`                   | Subgraph endpoint for pool/vault state queries.                                  | URL (`https://...`)      | Required                                       | None             |
     | `CONFIG_PATH`                    | Optional path to the runtime `config.json` file. Useful when the config is mounted somewhere other than the working directory, such as inside a container. | String (file path)       | Optional                                       | `./config.json`  |
     | `PRIVATE_KEY`                    | Raw private key of the keeper's authorized account. Intended as a headless fallback when the deployer injects it from a secret manager. | Hex string (`0x...`)     | Conditional (exactly one credential mode must be configured) | None             |
@@ -64,50 +84,50 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
     | `chainId`                        | Chain ID for the intended network.                                               | Integer                  | Optional                                       | 1 (Ethereum mainnet) |
     | `quoteTokenAddress`              | Address of the vault's quote token.                                              | Ethereum address (`0x...`) | Required                                     | None             |
-    | `metavaultAddress`               | Address of the Euler Earn (metavault) contract. If omitted, only the ark keeper runs. | Ethereum address (`0x...`) | Optional                                   | None             |
+    | `metavaultAddress`               | Address of the Euler Earn (metavault) contract. If omitted, only the ARK keeper runs. | Ethereum address (`0x...`) | Optional                                   | None             |
     | `keeper.intervalMs`              | Interval between keeper runs.                                                    | Integer (milliseconds)   | Required                                       | 43,200,000 (12h) |
     | `keeper.logLevel`                | Minimum severity of logs (`info`, `warn`, `error`).                              | String                   | Optional                                       | `info`           |
     | `keeper.exitOnSubgraphFailure`   | Abort run if the subgraph query fails during the check for bad debt in the pool. The default is fail-closed. Set this to `false` only if you explicitly prefer availability over the bad-debt guard during subgraph outages. | Boolean                  | Optional                                       | `true`           |
     | `keeper.haltIfLupBelowHtp`       | If operations trigger `LUPBelowHTP` error from Ajna, halt keeper until restarted to prevent more tokens from being added to the pool while move targets are likely to require liquidations. | Boolean | Required                      | N/A              |
-    | `oracle.apiUrl`                  | API endpoint for off-chain price oracle using CoinGecko.                         | URL (`https://...`)      | Conditional (if on-chain oracle is not primary and no fixed price is set) | None |
-    | `oracle.onchainPrimary`          | Use on-chain oracle as primary instead of CoinGecko.                             | Boolean                  | Required                                       | N/A              |
-    | `oracle.onchainAddress`          | Address of Chronicle on-chain oracle.                                            | Ethereum address (`0x...`) | Conditional (if `onchainPrimary` is true)    | None             |
-    | `oracle.onchainMaxStaleness`     | Max allowed age of on-chain price data. When omitted and the on-chain oracle is primary, the keeper defaults this to `86400` seconds. Set to `null` only to explicitly disable the staleness check. | Integer (seconds) or `null` | Optional                                  | `86400` when `oracle.onchainPrimary` is `true`, otherwise `null` |
+    | `oracle.apiUrl`                  | API endpoint for offchain price oracle using CoinGecko.                          | URL (`https://...`)      | Conditional (if onchain oracle is not primary and no fixed price is set) | None |
+    | `oracle.onchainPrimary`          | Use onchain oracle as primary instead of CoinGecko.                              | Boolean                  | Required                                       | N/A              |
+    | `oracle.onchainAddress`          | Address of Chronicle onchain oracle.                                             | Ethereum address (`0x...`) | Conditional (if `onchainPrimary` is true)    | None             |
+    | `oracle.onchainMaxStaleness`     | Max allowed age of onchain price data. When omitted and the onchain oracle is primary, the keeper defaults this to `86400` seconds. Set to `null` only to explicitly disable the staleness check. | Integer (seconds) or `null` | Optional                                  | `86400` when `oracle.onchainPrimary` is `true`, otherwise `null` |
     | `oracle.fixedPrice`              | The keeper can be configured to skip both oracles and use a hard-coded price, defined here. Set to `null` to use the live oracle. The value is parsed as a decimal string into Ajna's 18-decimal price domain, independent of quote-token decimals. Numeric literals are rejected to avoid precision loss. When enabled, the keeper emits a startup warning because this mode bypasses live oracle checks. | String decimal (e.g. `"1.00"`) or `null` | Optional | `null` |
     | `oracle.futureSkewTolerance`     | Max clock drift allowed from Chronicle timestamps.                               | Integer (seconds)        | Optional                                       | 120 (2 minutes)  |
     | `transaction.gasBuffer`          | Accounts for occasional Viem gas underestimation for the functions that interact with Ajna, resulting in sporadic `OutOfGas` reversions. | Integer (percentage)     | Optional                                       | 50 (50%)         |
     | `transaction.defaultGas`         | Default gas limit in the event that gas estimation with the above buffer fails.  | Integer                  | Optional                                       | 1,500,000        |
     | `transaction.confirmations`      | Number of block confirmations to wait for each tx.                               | Integer                  | Required                                       | N/A              |
-    | `arkGlobal.optimalBucketDiff`    | Offset (in bucket indexes) from current pool price to select the optimal bucket. Can also be set per ark. | Integer | Conditional (required globally or per ark) | None             |
+    | `arkGlobal.optimalBucketDiff`    | Offset (in bucket indexes) from current pool price to select the optimal bucket. Can also be set per ARK. | Integer | Conditional (required globally or per ARK) | None             |
     | `arkGlobal.bufferPadding`        | Accounts for the slight variation in the value of `totalAssets` (due to interest accruing in Ajna). | String (`WAD`)  | Optional                                       | `"100000000000000"` (1e14) |
     | `arkGlobal.minMoveAmount`        | Skip moves if bucket's quote token balance is below this amount (dust limit) - enforced by vault. | String (`WAD` units)    | Optional                                       | `"1000001"`      |
     | `arkGlobal.minTimeSinceBankruptcy` | Minimum time since bucket bankruptcy to be considered valid. Abort keeper run if timestamp is between this value and current time. | Integer (seconds) | Optional                        | 259,200 (72h)    |
     | `arkGlobal.maxAuctionAge`        | Only consider auctions with bad debt if they are older than this value.          | Integer (seconds)        | Optional                                       | 259,200 (72h)    |
-    | `arks[].address`                 | Address of the ark (Ajna vault strategy) registered in the metavault.            | Ethereum address (`0x...`) | Required                                     | None             |
-    | `arks[].vaultAddress`            | Address of the ark's vault contract.                                             | Ethereum address (`0x...`) | Required                                     | None             |
-    | `arks[].vaultAuthAddress`        | Address of the ark's vault auth contract.                                        | Ethereum address (`0x...`) | Required                                     | None             |
-    | `arks[].allocation.min`          | Minimum allocation percentage for this ark.                                      | Integer (percentage)     | Required                                       | N/A              |
-    | `arks[].allocation.max`          | Maximum allocation percentage for this ark. Must not be 0.                       | Integer (percentage)     | Required                                       | N/A              |
-    | `arks[].optimalBucketDiff`       | Per-ark override for `arkGlobal.optimalBucketDiff`.                              | Integer                  | Optional                                       | `arkGlobal` value |
-    | `arks[].bufferPadding`           | Per-ark override for `arkGlobal.bufferPadding`.                                  | String (`WAD`)           | Optional                                       | `arkGlobal` value |
-    | `arks[].minMoveAmount`           | Per-ark override for `arkGlobal.minMoveAmount`.                                  | String (`WAD` units)     | Optional                                       | `arkGlobal` value |
-    | `arks[].minTimeSinceBankruptcy`  | Per-ark override for `arkGlobal.minTimeSinceBankruptcy`.                         | Integer (seconds)        | Optional                                       | `arkGlobal` value |
-    | `arks[].maxAuctionAge`           | Per-ark override for `arkGlobal.maxAuctionAge`.                                  | Integer (seconds)        | Optional                                       | `arkGlobal` value |
+    | `arks[].address`                 | Address of the ARK, which is the Ajna vault strategy registered in the metavault. | Ethereum address (`0x...`) | Required                                     | None             |
+    | `arks[].vaultAddress`            | Address of the ARK's vault contract.                                             | Ethereum address (`0x...`) | Required                                     | None             |
+    | `arks[].vaultAuthAddress`        | Address of the ARK's vault auth contract.                                        | Ethereum address (`0x...`) | Required                                     | None             |
+    | `arks[].allocation.min`          | Minimum allocation percentage for this ARK.                                      | Integer (percentage)     | Required                                       | N/A              |
+    | `arks[].allocation.max`          | Maximum allocation percentage for this ARK. Must not be 0.                       | Integer (percentage)     | Required                                       | N/A              |
+    | `arks[].optimalBucketDiff`       | Per-ARK override for `arkGlobal.optimalBucketDiff`.                              | Integer                  | Optional                                       | `arkGlobal` value |
+    | `arks[].bufferPadding`           | Per-ARK override for `arkGlobal.bufferPadding`.                                  | String (`WAD`)           | Optional                                       | `arkGlobal` value |
+    | `arks[].minMoveAmount`           | Per-ARK override for `arkGlobal.minMoveAmount`.                                  | String (`WAD` units)     | Optional                                       | `arkGlobal` value |
+    | `arks[].minTimeSinceBankruptcy`  | Per-ARK override for `arkGlobal.minTimeSinceBankruptcy`.                         | Integer (seconds)        | Optional                                       | `arkGlobal` value |
+    | `arks[].maxAuctionAge`           | Per-ARK override for `arkGlobal.maxAuctionAge`.                                  | Integer (seconds)        | Optional                                       | `arkGlobal` value |
     | `buffer.address`                 | Address of the buffer strategy registered in the metavault.                      | Ethereum address (`0x...`) | Required                                     | None             |
     | `buffer.allocation`              | Target allocation percentage for the buffer.                                     | Integer (percentage)     | Required                                       | N/A              |
-    | `minRateDiff`                    | Minimum percentage difference in borrow fee rates between two arks before capital is reallocated from the lower-rate ark to the higher-rate ark. | Integer (percentage) | Optional               | 10               |
+    | `minRateDiff`                    | Minimum percentage difference in borrow fee rates between two ARKs before capital is reallocated from the lower-rate ARK to the higher-rate ARK. | Integer (percentage) | Optional               | 10               |
 
-    The sum of all `arks[].allocation.max` values plus `buffer.allocation` must equal 100. Per-ark settings (`optimalBucketDiff`, `bufferPadding`, `minMoveAmount`, `minTimeSinceBankruptcy`, `maxAuctionAge`) can be set globally in `arkGlobal` or individually per ark. Per-ark values take precedence over global values.
+    The sum of all `arks[].allocation.max` values plus `buffer.allocation` must equal 100. Per-ARK settings (`optimalBucketDiff`, `bufferPadding`, `minMoveAmount`, `minTimeSinceBankruptcy`, `maxAuctionAge`) can be set globally in `arkGlobal` or individually per ARK. Per-ARK values take precedence over global values.
 
-2. Fetching State:
+2. <a name="technical-overview-2-fetching-state"></a>Fetching State:
 
     **Metavault keeper:**
-    * `getExpectedSupplyAssets(strategy)` - reads the current balance for each strategy (each ark and the buffer) from the Euler Earn contract. The sum of all strategy balances is the total assets under management.
-    * `vault.getBorrowFeeRate()` - reads the borrow fee rate from the Ajna pool associated with each ark. This rate is used to compare yield across arks and decide whether reallocation is warranted.
-    * `poolHasBadDebt(vault)` - checks each ark's pool for bad debt (same check as the ark keeper). Arks with bad debt are excluded from receiving capital during reallocation.
-    * `poolBalanceCap(balance, vault)` - caps each ark's balance to the actual quote token balance in its pool, preventing the keeper from planning moves for tokens that are not currently available.
+    * `getExpectedSupplyAssets(strategy)` - reads the current balance for each strategy, meaning each ARK and the buffer, from the Euler Earn contract. The sum of all strategy balances is the total assets under management.
+    * `vault.getBorrowFeeRate()` - reads the borrow fee rate from the Ajna pool associated with each ARK. This rate is used to compare yield across ARKs and decide whether reallocation is warranted.
+    * `poolHasBadDebt(vault)` - checks each ARK's pool for bad debt, using the same check as the ARK keeper. ARKs with bad debt are excluded from receiving capital during reallocation.
+    * `poolBalanceCap(balance, vault)` - caps each ARK's balance to the actual quote token balance in its pool, preventing the keeper from planning moves for tokens that are not currently available.
 
-    **Ark keeper:**
+    **ARK keeper:**
     
     * Vault Status and configuration:
       * `vault.paused()` - reads the vault's global pause flag. If true, all keeper actions will immediately exit with no state changes.
@@ -127,15 +147,15 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
       * `getPriceToIndex()` - converts a given price into the corresponding bucket index. The keeper uses this to translate the current pool price into an index before applying `optimalBucketDiff`.
       * `getIndexToPrice()` - converts a given bucket index back into its price. The keeper uses this to verify or display the price level of the selected target bucket.
 
-3. <a name="exit-conditions"></a>Early Fail or Skip Conditions:
+3. <a name="technical-overview-3-early-fail-or-skip-conditions"></a><a name="exit-conditions"></a>Early Fail or Skip Conditions:
 
     **Metavault keeper:**
-    * If any ark is paused - the metavault keeper skips the entire run.
-    * If the planned reallocation would violate an ark's allocation bounds (below min or above max) - the run is aborted with an error.
+    * If any ARK is paused - the metavault keeper skips the entire run.
+    * If the planned reallocation would violate an ARK's allocation bounds, below min or above max, the run is aborted with an error.
     * If the total withdrawn does not equal the total supplied after computing allocations - the run is aborted due to an inconsistent reallocation invariant.
     * If no allocations need to change - the run exits cleanly with no state changes.
 
-    **Ark keeper:**
+    **ARK keeper:**
     
     * If `vault.paused()` is true - the keeper exits immediately with no state changes.
     * If `poolHasBadDebt()` is true - the pool has unresolved bad debt or active liquidations, the keeper exits immediately.
@@ -145,31 +165,31 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     * If the optimal bucket has been bankrupt more recently than the configured `minTimeSinceBankruptcy`, the run is aborted to prevent risky deposits.
     * If the optimal bucket's debt is locked due to an ongoing auction (i.e., withdrawals from the bucket would revert in Ajna with `RemoveDepositLockedByAuctionDebt()`), the run is aborted to prevent locking vault funds in the bucket.
 
-4. Compute Targets:
+4. <a name="technical-overview-4-compute-targets"></a>Compute Targets:
 
     **Metavault keeper:**
-    * Buffer target is computed as `(totalAssets * buffer.allocation) / 100`. The metavault keeper first caps any arks exceeding their max allocation, then fills or drains the buffer to its target by pulling from or pushing to arks sorted by rate (lowest-rate arks are drained first, highest-rate arks are filled first).
-    * Rate evaluation compares borrow fee rates across arks. For each ark, the keeper identifies all other arks whose rate exceeds the current ark's rate by at least `minRateDiff` percent. The threshold check is: `targetRate * 100 >= originRate * (100 + minRateDiff)`.
-    * When reallocating for rates, the keeper processes arks from lowest rate to highest. For each ark with available funds (above its min allocation), it moves capital to higher-rate targets (sorted by rate descending) up to each target's max allocation. Arks with bad debt are skipped.
+    * Buffer target is computed as `(totalAssets * buffer.allocation) / 100`. The metavault keeper first caps any ARKs exceeding their max allocation, then fills or drains the buffer to its target by pulling from or pushing to ARKs sorted by rate. Lowest-rate ARKs are drained first and highest-rate ARKs are filled first.
+    * Rate evaluation compares borrow fee rates across ARKs. For each ARK, the keeper identifies all other ARKs whose rate exceeds the current ARK's rate by at least `minRateDiff` percent. The threshold check is: `targetRate * 100 >= originRate * (100 + minRateDiff)`.
+    * When reallocating for rates, the keeper processes ARKs from lowest rate to highest. For each ARK with available funds above its min allocation, it moves capital to higher-rate targets, sorted by rate descending, up to each target's max allocation. ARKs with bad debt are skipped.
 
-    **Ark keeper:**
+    **ARK keeper:**
     
-    * The keeper reads the current pool price (`getPrice()`), normalizes off-chain and fixed-price inputs into Ajna's 18-decimal price domain, converts that price to a bucket index (`getPriceToIndex(price)`), then applies an integer offset `optimalBucketDiff` to produce `optimalBucket`, which `_getKeeperData()` stores for subsequent range checks.
+    * The keeper reads the current pool price (`getPrice()`), normalizes offchain and fixed-price inputs into Ajna's 18-decimal price domain, converts that price to a bucket index (`getPriceToIndex(price)`), then applies an integer offset `optimalBucketDiff` to produce `optimalBucket`, which `_getKeeperData()` stores for subsequent range checks.
     * Concurrent internal index calculations - `_getKeeperData()` computes `lupIndex`, `htpIndex`, and `optimalBucket` using `Promise.all`, and binds the third value to `optimalBucket`.
     * Buffer target (computed here) & gap (computed later) - `_getKeeperData()` computes `bufferTarget` via `_calculateBufferTarget()`, which multiplies total assets (scaled to WAD using asset decimals) by the configured `bufferRatio` and divides by 10,000 (basis points). It also reads `bufferTotal` with `getBufferTotal()`. The actual deficit/surplus ("gap") is only derived during rebalancing (e.g. `calculateBufferDeficit(data)`), so it is not stored in `_getKeeperData()`.
     * Per-bucket sizing - The keeper sizes per bucket moves by using `lpToValue(bucket)` which provides the quote value used to size moves, whereas `getLpToValue(optimalBucket)` is only used to detect dusty optimal and skip.
     * KeeperRunData payload - `_getKeeperData()` returns `{ buckets, bufferTotal, bufferTarget, price, lup, htp, lupIndex, htpIndex, optimalBucket }`.
     * The keeper then validates `optimalBucket` with `isOptimalBucketInRange(data)`. This uses `getIndexToPrice`, `getLup`, `getHtp`, and `getMinBucketIndex()`, where `buckets` is the per-bucket snapshot the sizing loop iterates over.
 
-5. Execute Rebalancing:
+5. <a name="technical-overview-5-execute-rebalancing"></a>Execute Rebalancing:
 
     **Metavault keeper:**
-    * For each ark whose computed allocation decreased, the metavault keeper determines which buckets to withdraw from using `selectBuckets(vault, amountToMove)`. This function selects the optimal set of buckets to satisfy the withdrawal amount: if a single bucket has enough value, it is used (preferring the lowest-price bucket among candidates). Otherwise, the function fills greedily from the largest-value buckets first. In all cases, if a partial withdrawal would leave behind LP tokens below the dust threshold, the full bucket value is taken instead.
+    * For each ARK whose computed allocation decreased, the metavault keeper determines which buckets to withdraw from using `selectBuckets(vault, amountToMove)`. This function selects the optimal set of buckets to satisfy the withdrawal amount: if a single bucket has enough value, it is used, preferring the lowest-price bucket among candidates. Otherwise, the function fills greedily from the largest-value buckets first. In all cases, if a partial withdrawal would leave behind LP tokens below the dust threshold, the full bucket value is taken instead.
     * For each selected bucket, the keeper calls `vault.drain(bucket)` to claim pending interest, then `vault.moveToBuffer(bucket, amount)` to move the funds into the buffer.
     * After all `moveToBuffer` calls complete, the keeper builds the final allocation array for the `reallocate()` call. Decreasing allocations are ordered first (withdrawals), then increasing allocations (deposits). The last increasing allocation uses `maxUint256` to absorb rounding dust. The keeper validates that the total withdrawn equals the total supplied before submitting.
     * The `reallocate()` call on the Euler Earn contract atomically redistributes capital across all strategies according to the new allocations.
 
-    **Ark keeper:**
+    **ARK keeper:**
     
     * If the Buffer is in deficit and below target, the keeper withdraws from out-of-range buckets into the Buffer until the deficit is closed. For each candidate bucket, if `bucket === optimalBucket` or `lpToValue(bucket) < minMoveAmount` or `isBucketInRange(bucket, data) === true`, it skips. Otherwise it calls `vault.moveToBuffer(from=bucket, amount=min(lpToValue(bucket), remainingDeficit))`.
     * If the Buffer is not in deficit (i.e. at target), the keeper consolidates out-of-range buckets. For each bucket where `!isBucketInRange(...)`, if it is not the `optimalBucket` and `lpToValue(bucket) >= minMoveAmount`, call `vault.move(from=bucket, to=optimalBucket, amount=lpToValue(bucket))`, otherwise skip.
@@ -180,29 +200,29 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
       * `shouldSkipBucket(bucket, data)` - returns `true` if the bucket is the `optimalBucket`, if `lpToValue(bucket) < minMoveAmount` (dust), or if `isBucketInRange(bucket, data)` is `true`. Otherwise, the bucket is a candidate for moves.
       * `isBucketInRange(bucketPrice, data)` - returns `true` if the bucket's price lies within `[max(LUP, priceAt(minBucketIndex)), min(currentPrice, HTP)]`. Buckets outside this range are considered out-of-range and eligible for rebalancing.
 
-6. Housekeeping & Telemetry:
+6. <a name="technical-overview-6-housekeeping-and-telemetry"></a>Housekeeping & Telemetry:
     * Vault events & functions:
       * `Move(fromBucket, toBucket, amount)` - vault function and event that shifts liquidity directly between buckets. The keeper uses it when consolidating out-of-range buckets into the `optimalBucket` without touching the Buffer.
       * `MoveFromBuffer(toBucket, amount)` - vault function and event that moves liquidity out of the Buffer into a bucket. The keeper calls this to drain Buffer surplus or to place funds into the `optimalBucket`.
       * `MoveToBuffer(fromBucket, amount)` - vault function and event that withdraws liquidity from a bucket into the Buffer. The keeper uses it to top up the Buffer or cover a deficit.
     * Logs (pino-formatted JSON, filterable by event field):
       * Info events:
-          * `ark_run_complete` - final state for an ark run with buffer total, buffer target, current price, and optimal bucket.
+          * `ark_run_complete` - final state for an ARK run with buffer total, buffer target, current price, and optimal bucket.
           * `metavault_run_complete` - metavault reallocation completed with final allocations.
           * `no_metavault_reallocation_needed` - metavault run determined no reallocation is needed.
-          * `paused_arks_detected` - one or more arks are paused, metavault run skipped.
+          * `paused_arks_detected` - one or more ARKs are paused, metavault run skipped.
           * `keeper_stopping` - process shutdown (SIGINT/SIGTERM).
           * `keeper_price_fixed` - keeper is bypassing price fetch and using the value defined in the config.
           * `tx_success` - successful tx with hash, block, action (`move`, `moveToBuffer`, `moveFromBuffer`, `drain`, `reallocate`), amount, and from/to buckets.
       * Warnings:
-          * `ark_run_halted` - emitted when the ark keeper is halted due to a `LUPBelowHTP` error. The keeper will not run again until the process is restarted.
+          * `ark_run_halted` - emitted when the ARK keeper is halted due to a `LUPBelowHTP` error. The keeper will not run again until the process is restarted.
           * `subgraph_fail_open_enabled` - emitted at startup when `keeper.exitOnSubgraphFailure` is set to `false`, meaning subgraph query failures will be treated as if there are no auctions.
           * `oracle_staleness_check_disabled` - emitted at startup when the Chronicle stale-price check has been explicitly disabled with `oracle.onchainMaxStaleness: null`.
           * `oracle_fixed_price_enabled` - emitted at startup when `oracle.fixedPrice` is configured and the keeper will bypass live oracle reads.
           * `price_query_failed` - query failed for the first of the two configured price feeds.
           * `gas_estimation_failed` - Viem gas estimation for vault functions failed, indicating that the keeper will fall back to the hard-coded value.
       * Errors:
-          * `ark_run_aborted` - emitted when an ark keeper run exits early for any of the reasons specified above in [Early Fail or Skip Conditions](#exit-conditions).
+          * `ark_run_aborted` - emitted when an ARK keeper run exits early for any of the reasons specified above in [Early Fail or Skip Conditions](#exit-conditions).
           * `metavault_run_aborted` - metavault run aborted with the reason.
           * `keeper_run_failed` - run aborted with error details (scheduler-level catch).
           * `tx_failed` - failed tx with phase (`send`, `fail`, `revert`, `insufficient_funds`), hash, receipt, and context.
@@ -211,7 +231,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
           * `uncaught_exception` - an unhandled error crashed the keeper process.
           * `unhandled_rejection` - an unhandled promise rejection crashed the keeper process.
 
-## Local Set Up
+## <a name="local-set-up"></a>Local Set Up
 
 #### Install dependencies:
 
@@ -290,7 +310,7 @@ docker run --rm \
 
 Prefer `REMOTE_SIGNER_URL` plus `REMOTE_SIGNER_ADDRESS` for production deployments where possible. If you use `PRIVATE_KEY`, inject it at runtime from the deployment environment or secret manager rather than baking it into an image.
 
-## Configure Environment
+## <a name="configure-environment"></a>Configure Environment
 
 Configuration is split between `.env` (secrets and infrastructure) and `config.json` (operational parameters).
 
@@ -314,11 +334,56 @@ For `config.json`, start from the example:
 cp config.example.json config.json
 ```
 
-Then fill in the placeholder addresses and any environment-specific settings. At minimum, `quoteTokenAddress`, `arks`, `buffer`, and oracle configuration must be set. If the metavault address is provided, the metavault keeper will run alongside the ark keeper. If omitted, only the ark keeper runs.
+Then fill in the placeholder addresses and any environment-specific settings. At minimum, `quoteTokenAddress`, `arks`, `buffer`, and oracle configuration must be set. If the metavault address is provided, the metavault keeper will run alongside the ARK keeper. If omitted, only the ARK keeper runs.
 
 In production, `.env` values should be provided at runtime from the deployment environment. Prefer a remote signer when available. If you use a raw private key instead, inject it from the deployer's secret manager rather than baking it into images or committed files. The default Docker image expects `config.json` to be mounted at runtime, though you can also bake it into a derivative image if your deployment process requires that.
 
-## Run Tests
+## <a name="deployment-requirements"></a>Deployment Requirements
+
+For every managed ARK, the keeper signer must be authorised as a keeper in the ARK's `VaultAuth`. If an ARK is managed through this repo's metavault flow, its `bufferRatio` must be set to `0`. In this operating model, withdrawal liquidity is managed at the shared Euler Earn Buffer layer rather than being intentionally retained inside each ARK.
+
+If `metavaultAddress` is set, the Euler Earn deployment also needs to match the keeper's assumptions. The strategy at `buffer.address` must be the first strategy in the deployment's strategy array, its cap must be `type(uint136).max`, and that cap must already have been accepted on the metavault before the keeper starts. The keeper treats that strategy as the shared Buffer allocation when it computes metavault reallocations.
+
+## <a name="operator-responsibilities"></a>Operator Responsibilities
+
+This keeper automates rebalance decisions, but it does not own deployment operations. The operator is responsible for signer custody, process supervision, upstream service health, alert routing, contract permissions, and the config choices that define the keeper's risk posture.
+
+At a minimum, the operator must ensure the following:
+
+- the chosen credential mode matches the environment and the signer remains funded and reachable
+- the process runs under a supervisor and is restarted after crashes or intentional halts
+- RPC, subgraph, and oracle dependencies are monitored for latency, availability, and drift
+- warning, error, and fatal logs are routed to paging or incident tooling
+- ARK and metavault permissions are correct before the process is enabled
+- deployment-specific values such as interval, oracle mode, allocation bounds, and gas settings have been reviewed for the target market
+
+The settings below change the operational model and should be reviewed explicitly in every deployment:
+
+| Setting | Operational meaning |
+| ------- | ------------------- |
+| `keeper.exitOnSubgraphFailure` | `true` fails closed when the bad-debt dependency is unavailable. `false` keeps the process running but treats subgraph outages as if there are no blocking auctions. |
+| `oracle.fixedPrice` | Bypasses live oracle reads and freshness checks. Use only as an explicit emergency or controlled override. |
+| `oracle.onchainPrimary`, `oracle.onchainAddress`, `oracle.apiUrl`, `oracle.onchainMaxStaleness` | Define which oracle path the keeper trusts first, whether it can fall back, and how stale Chronicle data may be before the run aborts. |
+| `transaction.gasBuffer`, `transaction.defaultGas`, `transaction.confirmations` | Define gas padding, fallback gas limit, and how long the keeper waits before treating each submitted step as confirmed. |
+
+## <a name="failure-and-recovery"></a>Failure and Recovery
+
+A keeper run is not atomic across all writes. Each transaction is submitted independently, and later steps do not roll back earlier successful ones. The keeper waits according to `transaction.confirmations`, then continues from the result of that individual transaction.
+
+This matters in both flows. A metavault run can complete one or more `drain` or `moveToBuffer` transactions before the final `reallocate()` call. An ARK run can complete `updateInterest`, `drain`, `move`, `moveToBuffer`, or `moveFromBuffer` before another step fails. Recovery is the next run, which re-reads live state and recomputes from current balances, prices, and queue conditions rather than attempting rollback.
+
+The [full event list is above](#technical-overview-6-housekeeping-and-telemetry). For incident diagnosis, start with these:
+
+| Event | Meaning |
+| ----- | ------- |
+| `ark_run_halted` | An ARK hit `LUPBelowHTP` and will stay halted until the process is restarted. |
+| `paused_arks_detected`, `ark_run_aborted`, `metavault_run_aborted` | The run exited early because a contract state or keeper guard prevented safe progress. |
+| `subgraph_fail_open_enabled`, `subgraph_query_failed` | The bad-debt dependency is in fail-open mode or currently failing. |
+| `oracle_staleness_check_disabled`, `oracle_fixed_price_enabled`, `price_query_failed` | Oracle safety checks are disabled or a price source is degraded. |
+| `gas_estimation_failed`, `tx_failed` | A transaction needed fallback gas logic or failed to execute. |
+| `keeper_run_failed`, `uncaught_exception`, `unhandled_rejection` | The process or a full scheduled run failed at the top level. |
+
+## <a name="run-tests"></a>Run Tests
 
 First, complete the above steps for local configuration and set up. Then, install `foundryup`:
 
