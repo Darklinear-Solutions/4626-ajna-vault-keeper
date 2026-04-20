@@ -1,7 +1,7 @@
 import { gql, request } from 'graphql-request';
-import { env } from '../utils/env';
-import { config } from '../utils/config';
-import { log } from '../utils/logger';
+import { env } from '../utils/env.ts';
+import { config } from '../utils/config.ts';
+import { log } from '../utils/logger.ts';
 import type { Address } from 'viem';
 
 type GetUnsettledAuctionsResponse = {

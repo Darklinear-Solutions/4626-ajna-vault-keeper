@@ -1,8 +1,8 @@
-import { getAbi } from '../utils/abi';
-import { getAddress } from '../utils/address';
-import { client, readOnlyClient } from '../utils/client';
-import { config } from '../utils/config';
-import { log } from '../utils/logger';
+import { getAbi } from '../utils/abi.ts';
+import { getAddress } from '../utils/address.ts';
+import { client, readOnlyClient } from '../utils/client.ts';
+import { config } from '../utils/config.ts';
+import { log } from '../utils/logger.ts';
 import type { Address } from 'viem';
 
 type OracleData = readonly [bigint, bigint];
@@ -11,7 +11,6 @@ type PriceData = {
   client: typeof client | typeof readOnlyClient;
 };
 
-const MAX_STALENESS_SECS = BigInt(config.oracle.onchainMaxStaleness ?? 0);
 const FUTURE_SKEW_TOLERANCE_SECS = BigInt(config.oracle.futureSkewTolerance);
 
 export async function getOnchainPrice(): Promise<bigint> {
@@ -60,7 +59,10 @@ function checkForFutureTimestamp(rawAge: bigint, latestBlockTimestamp: bigint) {
 }
 
 function checkForStaleTimestamp(age: bigint) {
-  if (MAX_STALENESS_SECS > 0n && age > MAX_STALENESS_SECS) {
+  const maxStalenessSecs =
+    config.oracle.onchainMaxStaleness == null ? null : BigInt(config.oracle.onchainMaxStaleness);
+
+  if (maxStalenessSecs != null && age > maxStalenessSecs) {
     throw new Error('onchain oracle price is stale');
   }
 }

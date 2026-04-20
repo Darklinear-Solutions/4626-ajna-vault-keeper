@@ -8,7 +8,7 @@ import {
   type ArkAllocation,
   type BufferAllocation,
 } from '../../src/keepers/metavaultKeeper';
-import { type ArkEvaluation } from '../../src/metavault/utils/evaluateRates';
+import { evaluateRates, type ArkEvaluation } from '../../src/metavault/utils/evaluateRates';
 import { type MarketAllocation } from '../../src/metavault/metavault';
 import { type createVault } from '../../src/ark/vault';
 import { type Address, maxUint256 } from 'viem';
@@ -138,6 +138,16 @@ describe('_rebalanceBuffer', () => {
       expect(buffer.assets).toBe(400n * S);
     });
 
+    it('fills the buffer when the deficit is exactly MIN_MOVE_AMOUNT', () => {
+      const arks = [makeArk({ id: ADDR_A, assets: 200n * S, rate: 100n })];
+      const buffer = makeBuffer({ assets: 400n * S - 1_000_001n });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      expect(arks[0]!.assets).toBe(200n * S - 1_000_001n);
+      expect(buffer.assets).toBe(400n * S);
+    });
+
     it('fills from multiple arks when lowest-rate ark hits min', () => {
       const arks = [
         makeArk({ id: ADDR_A, assets: 200n * S, rate: 200n }),
@@ -263,6 +273,20 @@ describe('_rebalanceBuffer', () => {
       // Highest rate is B(200). B: max = 200*S (20%), capacity = 100*S, add 50*S
       expect(arks[1]!.assets).toBe(150n * S); // B increased
       expect(arks[0]!.assets).toBe(100n * S); // A untouched
+      expect(buffer.assets).toBe(400n * S);
+    });
+
+    it('drains the buffer when the excess is exactly MIN_MOVE_AMOUNT', () => {
+      const arks = [
+        makeArk({ id: ADDR_A, assets: 100n * S, rate: 100n }),
+        makeArk({ id: ADDR_B, assets: 100n * S, rate: 200n }),
+      ];
+      const buffer = makeBuffer({ assets: 400n * S + 1_000_001n });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      expect(arks[1]!.assets).toBe(100n * S + 1_000_001n);
+      expect(arks[0]!.assets).toBe(100n * S);
       expect(buffer.assets).toBe(400n * S);
     });
 
@@ -486,6 +510,33 @@ describe('_reallocateForRates', () => {
     expect(arks[2]!.assets).toBe(180n * S);
   });
 
+  it('routes the exact amount to the next-best target when the top-rate target has bad debt', () => {
+    const arks = [
+      makeArk({ id: ADDR_A, assets: 190n * S, min: 5, max: 20, rate: 100n }),
+      makeArk({ id: ADDR_B, assets: 150n * S, min: 5, max: 20, rate: 400n, hasBadDebt: true }),
+      makeArk({ id: ADDR_C, assets: 120n * S, min: 5, max: 20, rate: 300n }),
+    ];
+    const evaluations = evaluateRates(
+      arks.map((ark) => ({
+        vault: { getAddress: () => ark.id } as Vault,
+        min: ark.min,
+        max: ark.max,
+        rate: ark.rate,
+      })),
+    );
+
+    expect(evaluations.find((evaluation) => evaluation.address === ADDR_A)?.targets).toEqual([
+      ADDR_B,
+      ADDR_C,
+    ]);
+
+    _reallocateForRates(arks, evaluations, 1000n * S);
+
+    expect(arks[0]!.assets).toBe(110n * S);
+    expect(arks[1]!.assets).toBe(150n * S);
+    expect(arks[2]!.assets).toBe(200n * S);
+  });
+
   it('does nothing when evaluations have no targets', () => {
     const arks = [
       makeArk({ id: ADDR_A, assets: 150n * S, rate: 100n }),
@@ -594,11 +645,13 @@ describe('_validateAllocations', () => {
     expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
-  it('returns error when buffer does not equal target and not all arks at max', () => {
+  it('returns the exact buffer-target mismatch error when not all arks are at max', () => {
     const arks = [makeArk({ id: ADDR_A, assets: 100n * S, min: 5, max: 20 })];
     const buffer = makeBuffer({ assets: 350n * S, allocation: 40 }); // 350*S !== 400*S
 
-    expect(_validateAllocations(arks, buffer, totalAssets)).toContain('does not equal target');
+    expect(_validateAllocations(arks, buffer, totalAssets)).toBe(
+      `Buffer allocation ${350n * S} does not equal target ${400n * S}`,
+    );
   });
 
   it('passes when all arks at max and buffer above target', () => {

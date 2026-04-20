@@ -1,10 +1,17 @@
-import { log } from './logger';
-import { client } from './client';
-import { config } from './config';
-import { getAddress, type contracts } from './address';
-import { getAbi, type ContractAbiKey } from './abi';
-import { haltKeeper } from '../keepers/arkKeeper';
-import { parseEventLogs, decodeErrorResult, type TransactionReceipt, type Address } from 'viem';
+import { log } from './logger.ts';
+import { client } from './client.ts';
+import { config } from './config.ts';
+import { getAddress, type contracts } from './address.ts';
+import { getAbi, type ContractAbiKey } from './abi.ts';
+import { decodeAjnaError } from '../ajna/utils/decodeAjnaError.ts';
+import { haltKeeper } from '../keepers/arkKeeper.ts';
+import {
+  parseEventLogs,
+  decodeErrorResult,
+  type TransactionReceipt,
+  type Address,
+  isAddress,
+} from 'viem';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -14,10 +21,16 @@ export type TransactionData = {
   assets: bigint;
 };
 type ContractKey = keyof typeof contracts;
+type TransactionContext = Record<string, unknown>;
+
+const LUP_BELOW_HTP_SELECTOR = '0x444507e1';
 
 const confirmations = config.transaction.confirmations;
 
-export async function wait(txHash: Hash): Promise<TransactionReceipt> {
+export async function wait(
+  txHash: Hash,
+  context?: TransactionContext,
+): Promise<TransactionReceipt> {
   const receipt = await client.waitForTransactionReceipt({
     hash: txHash,
     confirmations,
@@ -33,14 +46,20 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
         data: tx.input,
       });
     } catch (err: any) {
-      const data = err?.cause?.cause?.data ?? err?.cause?.data ?? err?.data;
+      const data = getRevertData(err);
+      const errorName = getErrorName(err, data);
 
-      if (isLupBelowHtp(err)) {
-        if (config.keeper.haltIfLupBelowHtp) haltKeeper();
+      if (isLupBelowHtp(data, errorName)) {
+        const decoded = { errorName: 'LUPBelowHTP', data };
+        if (config.keeper.haltIfLupBelowHtp) {
+          const ark = getArkAddress(context);
+          if (ark) haltKeeper(ark);
+        }
         throw Object.assign(
           new Error(
             'LUPBelowHTP. Vault funds have been lent out by the pool and cannot be moved. Consider running the AJNA Keeper to check for necessary liquidations.',
           ),
+          { receipt, decoded, cause: err },
         );
       } else if (data) {
         let decoded;
@@ -65,7 +84,7 @@ export async function wait(txHash: Hash): Promise<TransactionReceipt> {
 
 export async function handleTransaction(
   tx: Promise<Hash>,
-  context?: Record<string, unknown>,
+  context?: TransactionContext,
 ): Promise<TransactionData> {
   let hash: Hash | undefined;
   let assets = 0n;
@@ -73,7 +92,7 @@ export async function handleTransaction(
 
   try {
     hash = await tx;
-    const receipt = await wait(hash);
+    const receipt = await wait(hash, context);
     status = true;
 
     if (context && context?.action !== 'reallocate') {
@@ -165,16 +184,18 @@ function getAmountMoved(receipt: any, action: string) {
 
 function abridgedViemError(err: unknown) {
   const e = err as any;
+  const data = getRevertData(err);
+  const errorName = getErrorName(err, data);
 
   return {
     shortMessage: e?.shortMessage,
-    errorName: e?.decoded?.errorName ?? e?.cause?.errorName ?? e?.errorName,
+    errorName,
     decoded: e?.decoded,
     contractAddress: e?.contractAddress,
     functionName: e?.functionName,
     args: e?.args,
     sender: e?.sender,
-    data: e?.cause?.cause?.data ?? e?.cause?.data ?? e?.data ?? e?.decoded?.data,
+    data,
     stack: e?.stack,
   };
 }
@@ -231,7 +252,30 @@ async function _checkInsufficientFunds(hash: Hash): Promise<boolean> {
   }
 }
 
-function isLupBelowHtp(err: any) {
-  const data = err?.cause?.cause?.data;
-  return data === '0x444507e1';
+function getRevertData(err: unknown): Hash | undefined {
+  const e = err as any;
+  const data = e?.cause?.cause?.data ?? e?.cause?.data ?? e?.data ?? e?.decoded?.data;
+  return typeof data === 'string' && data.startsWith('0x') ? (data as Hash) : undefined;
+}
+
+function getErrorName(err: unknown, data?: Hash): string | undefined {
+  const e = err as any;
+  const errorName = e?.decoded?.errorName ?? e?.cause?.errorName ?? e?.errorName;
+  if (typeof errorName === 'string') return errorName;
+  if (!data) return undefined;
+
+  try {
+    return decodeAjnaError(data).errorName;
+  } catch {
+    return undefined;
+  }
+}
+
+function isLupBelowHtp(data?: Hash, errorName?: string) {
+  return errorName === 'LUPBelowHTP' || data === LUP_BELOW_HTP_SELECTOR;
+}
+
+function getArkAddress(context?: TransactionContext): Address | undefined {
+  const ark = context?.ark;
+  return typeof ark === 'string' && isAddress(ark) ? ark : undefined;
 }

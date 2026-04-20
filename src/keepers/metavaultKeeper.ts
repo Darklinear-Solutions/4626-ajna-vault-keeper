@@ -1,17 +1,17 @@
-import { config, resolveArkSettings } from '../utils/config';
-import { createVault } from '../ark/vault';
-import { evaluateRates, type ArkEvaluation } from '../metavault/utils/evaluateRates';
+import { config, resolveArkSettings } from '../utils/config.ts';
+import { createVault } from '../ark/vault.ts';
+import { evaluateRates, type ArkEvaluation } from '../metavault/utils/evaluateRates.ts';
 import {
   getExpectedSupplyAssets,
   getTotalExpectedSupplyAssets,
   reallocate,
   type MarketAllocation,
-} from '../metavault/metavault';
-import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
-import { poolHasBadDebt } from '../subgraph/poolHealth';
-import { log } from '../utils/logger';
-import { handleTransaction, getGasWithBuffer } from '../utils/transaction';
-import { selectBuckets } from '../ark/utils/selectBuckets';
+} from '../metavault/metavault.ts';
+import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
+import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
+import { log } from '../utils/logger.ts';
+import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
+import { selectBuckets } from '../ark/utils/selectBuckets.ts';
 import { type Address, maxUint256 } from 'viem';
 
 // ============= Types =============
@@ -25,6 +25,7 @@ export type Ark = {
 
 export type ArkAllocation = {
   id: Address;
+  vaultAddress?: Address;
   assets: bigint;
   initialAssets: bigint;
   vault: ReturnType<typeof createVault>;
@@ -104,6 +105,7 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
 
     allocations.push({
       id: arkConfig.address,
+      vaultAddress: arkConfig.vaultAddress,
       assets: cappedBalance,
       initialAssets: cappedBalance,
       vault,
@@ -273,13 +275,18 @@ async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
     const bucketPlan = await selectBuckets(ark.vault, amountToMove);
 
     for (const { bucket, amount } of bucketPlan) {
-      await handleTransaction(ark.vault.drain(bucket), { action: 'drain', bucket });
+      const vaultAddress = ark.vaultAddress ?? ark.vault.getAddress();
+      await handleTransaction(ark.vault.drain(bucket), {
+        action: 'drain',
+        bucket,
+        ark: vaultAddress,
+      });
       const gas = await getGasWithBuffer('vault', 'moveToBuffer', [bucket, amount], ark.id);
       await handleTransaction(ark.vault.moveToBuffer(bucket, amount, gas), {
         action: 'moveToBuffer',
         from: bucket,
         amount,
-        ark: ark.id,
+        ark: vaultAddress,
       });
     }
   }

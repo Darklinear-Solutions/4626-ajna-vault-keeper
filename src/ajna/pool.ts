@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Address } from 'viem';
-import { contract } from '../utils/contract';
+import { contract } from '../utils/contract.ts';
 
 export function createPool(address: Address) {
   const pool = contract('pool', address);

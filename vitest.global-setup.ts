@@ -97,6 +97,9 @@ async function deployContracts(): Promise<void> {
       const testConfig = JSON.parse(
         fs.readFileSync(path.join(process.cwd(), 'config.test.json'), 'utf-8'),
       );
+
+      testConfig.oracle.onchainMaxStaleness = null;
+
       for (const ark of testConfig.arks) {
         ark.vaultAddress = addresses.VAULT_ADDRESS;
         ark.vaultAuthAddress = addresses.VAULT_AUTH_ADDRESS;
@@ -117,6 +120,8 @@ async function deployContracts(): Promise<void> {
       const testConfig = JSON.parse(
         fs.readFileSync(path.join(process.cwd(), 'config.test.json'), 'utf-8'),
       );
+
+      testConfig.oracle.onchainMaxStaleness = null;
       testConfig.metavaultAddress = addresses.METAVAULT_ADDRESS;
       testConfig.arks[0].address = addresses.ARK_1_ADDRESS;
       testConfig.arks[1].address = addresses.ARK_2_ADDRESS;

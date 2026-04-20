@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { metavaultRun } from '../../src/keepers/metavaultKeeper';
 import {
   getExpectedSupplyAssets,
@@ -9,6 +9,10 @@ import { config } from '../../src/utils/config';
 import { client } from '../../src/utils/client';
 import { contract } from '../../src/utils/contract';
 import { type Address } from 'viem';
+
+vi.mock('../../src/subgraph/poolHealth.ts', () => ({
+  poolHasBadDebt: vi.fn().mockResolvedValue(false),
+}));
 
 describe('metavault keeper run', () => {
   let snapshot: string;

@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import type { Address } from 'viem';
+import { toAsset } from './decimalConversion.ts';
 
 // ============= Raw JSON Types =============
 
@@ -35,8 +36,8 @@ type RawConfig = {
     apiUrl?: string;
     onchainPrimary: boolean;
     onchainAddress?: string;
-    onchainMaxStaleness: number | null;
-    fixedPrice: number | null;
+    onchainMaxStaleness?: number | null;
+    fixedPrice: string | null;
     futureSkewTolerance?: number;
   };
 
@@ -54,6 +55,10 @@ type RawConfig = {
     confirmations: number;
   };
 
+  remoteSigner?: {
+    requestTimeoutMs?: number;
+  };
+
   arks: ArkConfig[];
   buffer: {
     address: Address;
@@ -64,7 +69,26 @@ type RawConfig = {
 
 // ============= Parse & Validate =============
 
-const raw: RawConfig = JSON.parse(readFileSync(join(process.cwd(), 'config.json'), 'utf-8'));
+export const DEFAULT_ONCHAIN_MAX_STALENESS = 86400;
+export const DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS = 30000;
+
+const CONFIG_PATH = process.env.CONFIG_PATH
+  ? resolve(process.env.CONFIG_PATH)
+  : join(process.cwd(), 'config.json');
+
+let raw: RawConfig;
+
+try {
+  raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
+} catch (error) {
+  if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
+    throw new Error(
+      `Configuration file not found at ${CONFIG_PATH}. Set CONFIG_PATH or place config.json in the working directory.`,
+    );
+  }
+
+  throw error;
+}
 
 for (const [i, ark] of raw.arks.entries()) {
   if (ark.allocation.max === 0)
@@ -84,18 +108,62 @@ if (raw.arks.length > 0 && raw.buffer.allocation > 0) {
   }
 }
 
-if (!raw.oracle.onchainPrimary && !raw.oracle.fixedPrice) {
+if (raw.oracle.fixedPrice != null) {
+  if (typeof raw.oracle.fixedPrice !== 'string') {
+    throw new Error(
+      'config.json: oracle.fixedPrice must be a string decimal to avoid precision loss',
+    );
+  }
+  if (toAsset(raw.oracle.fixedPrice, 18) <= 0n) {
+    throw new Error('config.json: oracle.fixedPrice must be a positive decimal value');
+  }
+}
+
+if (!raw.oracle.onchainPrimary && raw.oracle.fixedPrice == null) {
   if (!raw.oracle.apiUrl)
     throw new Error(
       'config.json: oracle.apiUrl is required when onchainPrimary is false and fixedPrice is not set',
     );
 }
 
-if (raw.oracle.onchainPrimary && !raw.oracle.onchainAddress) {
+const hasOnchainOracle = Boolean(raw.oracle.onchainAddress);
+
+if (raw.oracle.onchainPrimary && !hasOnchainOracle) {
   throw new Error('config.json: oracle.onchainAddress is required when onchainPrimary is true');
 }
 
-raw.keeper.exitOnSubgraphFailure ??= false;
+if (raw.oracle.onchainMaxStaleness === undefined) {
+  raw.oracle.onchainMaxStaleness = hasOnchainOracle ? DEFAULT_ONCHAIN_MAX_STALENESS : null;
+}
+
+if (
+  raw.oracle.onchainMaxStaleness != null &&
+  (!Number.isInteger(raw.oracle.onchainMaxStaleness) || raw.oracle.onchainMaxStaleness <= 0)
+) {
+  throw new Error('config.json: oracle.onchainMaxStaleness must be a positive integer or null');
+}
+
+if (raw.remoteSigner !== undefined) {
+  if (typeof raw.remoteSigner !== 'object' || raw.remoteSigner === null) {
+    throw new Error('config.json: remoteSigner must be an object when provided');
+  }
+  if (raw.remoteSigner.requestTimeoutMs !== undefined) {
+    const value = raw.remoteSigner.requestTimeoutMs;
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error('config.json: remoteSigner.requestTimeoutMs must be a positive integer');
+    }
+    if (value > raw.keeper.intervalMs) {
+      throw new Error(
+        `config.json: remoteSigner.requestTimeoutMs (${value}) must not exceed keeper.intervalMs (${raw.keeper.intervalMs})`,
+      );
+    }
+  }
+}
+
+raw.remoteSigner ??= {};
+raw.remoteSigner.requestTimeoutMs ??= DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS;
+
+raw.keeper.exitOnSubgraphFailure ??= true;
 raw.oracle.futureSkewTolerance ??= 120;
 raw.arkGlobal.bufferPadding ??= '100000000000000';
 raw.arkGlobal.minMoveAmount ??= '1000001';
@@ -149,6 +217,7 @@ export const config = {
   oracle: raw.oracle as Required<RawConfig['oracle']>,
   arkGlobal: raw.arkGlobal as Required<RawConfig['arkGlobal']>,
   transaction: raw.transaction as Required<RawConfig['transaction']>,
+  remoteSigner: raw.remoteSigner as Required<NonNullable<RawConfig['remoteSigner']>>,
   quoteTokenAddress: raw.quoteTokenAddress.toLowerCase() as Address,
   metavaultAddress: (raw.metavaultAddress || undefined) as Address | undefined,
   defaultGas: BigInt(raw.transaction.defaultGas!),

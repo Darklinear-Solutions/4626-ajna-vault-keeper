@@ -1,5 +1,5 @@
 import type { Address } from 'viem';
-import { contract } from '../utils/contract';
+import { contract } from '../utils/contract.ts';
 
 export function createPoolInfoUtils(address: Address, poolAddress: Address) {
   const poolInfoUtils = contract('poolInfoUtils', address);

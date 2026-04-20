@@ -1,5 +1,5 @@
-import { client } from '../../utils/client';
-import { config } from '../../utils/config';
+import { client } from '../../utils/client.ts';
+import { config } from '../../utils/config.ts';
 import { erc20Abi, type Address } from 'viem';
 
 type VaultLike = { getPoolAddress: () => Promise<Address> };

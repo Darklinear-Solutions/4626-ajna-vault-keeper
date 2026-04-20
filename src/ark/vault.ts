@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Address } from 'viem';
-import { contract } from '../utils/contract';
+import { contract } from '../utils/contract.ts';
 
 const buffer = (bufferAddress: Address) => contract('buffer', bufferAddress);
 
@@ -41,6 +41,9 @@ export function createVault(address: Address, vaultAuthAddress?: Address) {
     getBuckets: () => vault().read.getBuckets(),
     getAssetDecimals: () => vault().read.assetDecimals(),
     getTotalAssets: () => vault().read.totalAssets(),
+    getTotalSupply: async () => BigInt(await vault().read.totalSupply()),
+    getBalanceOf: async (account: Address) => BigInt(await vault().read.balanceOf([account])),
+    convertToAssets: async (shares: bigint) => BigInt(await vault().read.convertToAssets([shares])),
     getPoolInfoUtilsAddress: () => vault().read.info(),
     getBufferAddress: () => vault().read.buffer(),
     getPoolAddress: getPoolAddr,

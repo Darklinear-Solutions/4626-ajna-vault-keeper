@@ -1,14 +1,15 @@
-import { type ResolvedArkSettings } from '../utils/config';
-import { log } from '../utils/logger';
-import { toWad } from '../utils/decimalConversion';
-import { poolBalanceCap } from '../ajna/utils/poolBalanceCap';
-import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction';
-import { getPrice } from '../oracle/price';
-import { poolHasBadDebt } from '../subgraph/poolHealth';
-import { createVault } from '../ark/vault';
+import { type ResolvedArkSettings } from '../utils/config.ts';
+import { config } from '../utils/config.ts';
+import { log } from '../utils/logger.ts';
+import { toWad } from '../utils/decimalConversion.ts';
+import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
+import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction.ts';
+import { getPrice } from '../oracle/price.ts';
+import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
+import { createVault } from '../ark/vault.ts';
 import { type Address } from 'viem';
 
-let halted = false;
+const haltedArks = new Set<Address>();
 let vault: ReturnType<typeof createVault>;
 let _settings: ResolvedArkSettings;
 
@@ -47,7 +48,7 @@ export async function arkRun(
   vault = createVault(address, vaultAuthAddress);
   _settings = settings;
 
-  if (halted) return logRunExit('keeper halted');
+  if (isCurrentArkHalted()) return logRunExit('keeper halted');
   if (await vault.isPaused()) return logRunExit('vault is currently paused');
   if (await poolHasBadDebt(vault, _settings.maxAuctionAge)) return logRunExit('pool has bad debt');
 
@@ -83,6 +84,8 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
   let bufferNeeded = await _calculateBufferDeficit(data);
 
   for (let i = 0; i < data.buckets.length; i++) {
+    if (isCurrentArkHalted()) return;
+
     const bucket = data.buckets[i]!;
     await handleTransaction(vault.drain(bucket), {
       action: 'drain',
@@ -109,18 +112,22 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
 }
 
 async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
+  if (isCurrentArkHalted()) return;
+
   await _refreshBufferValues(data);
-  if (data.bufferTarget === 0n) return;
 
   const difference = data.bufferTotal - data.bufferTarget;
-  const abs = difference >= 0n ? difference : -difference;
-
-  if (abs <= _settings.bufferPadding + data.minAmount) return;
 
   if (difference > 0n) {
-    const amount = difference - _settings.bufferPadding;
+    const surplus = await _calculateBufferSurplus(data);
+    if (surplus <= _settings.bufferPadding + data.minAmount) return;
+
+    const amount = surplus - _settings.bufferPadding;
     await moveExcessFromBuffer(amount, data.optimalBucket);
   } else {
+    const deficit = -difference;
+    if (deficit <= _settings.bufferPadding + data.minAmount) return;
+
     const amount = await poolBalanceCap(-difference - _settings.bufferPadding, vault);
     await fillBufferDeficit(amount, data);
   }
@@ -172,7 +179,7 @@ function planBucketOperations(
 // ============= Move Execution =============
 
 async function executeMoveOperation(op: MoveOperation): Promise<TransactionData | undefined> {
-  if (halted) return;
+  if (isCurrentArkHalted()) return;
   if (op.from === 'Buffer') {
     const gas = await getGasWithBuffer(
       'vault',
@@ -217,7 +224,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
 }
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
-  if (halted) return;
+  if (isCurrentArkHalted()) return;
   await handleTransaction(vault.drain(targetBucket), {
     action: 'drain',
     bucket: targetBucket,
@@ -238,10 +245,12 @@ async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promi
 }
 
 async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<void> {
-  if (halted) return;
+  if (isCurrentArkHalted()) return;
   let remaining = needed;
 
   for (let i = 0; i < data.buckets.length && remaining > data.minAmount; i++) {
+    if (isCurrentArkHalted()) return;
+
     const bucket = data.buckets[i]!;
     await handleTransaction(vault.drain(bucket), {
       action: 'drain',
@@ -267,6 +276,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       action: 'moveToBuffer',
       from: bucket,
       amount: amountToMove,
+      ark: vault.getAddress(),
     });
 
     if (txData?.status) remaining -= txData?.assets;
@@ -338,13 +348,12 @@ async function optimalBucketHasCollateral(data: KeeperRunData): Promise<boolean>
 // ============= Data Fetching =============
 
 export async function _getKeeperData(): Promise<KeeperRunData> {
-  const assetDecimals = await vault.getAssetDecimals();
   const [initialBuckets, bufferTotal, lup, htp, price] = await Promise.all([
     vault.getBuckets(),
     vault.getBufferTotal(),
     vault.getLup(),
     vault.getHtp(),
-    getPrice(assetDecimals),
+    getPrice(),
   ]);
 
   for (let i = 0; i < initialBuckets.length; i++) {
@@ -400,6 +409,36 @@ async function _calculateBufferDeficit(data: KeeperRunData): Promise<bigint> {
   return deficit > _settings.bufferPadding ? deficit - _settings.bufferPadding : 0n;
 }
 
+async function _calculateBufferSurplus(data: KeeperRunData): Promise<bigint> {
+  if (data.bufferTotal <= data.bufferTarget) return 0n;
+
+  const bufferRatio = await vault.getBufferRatio();
+  if (bufferRatio !== 0n) return data.bufferTotal - data.bufferTarget;
+
+  const reservedBuffer = await _calculateReservedExternalBuffer();
+  if (data.bufferTotal <= reservedBuffer) return 0n;
+
+  return data.bufferTotal - reservedBuffer;
+}
+
+async function _calculateReservedExternalBuffer(): Promise<bigint> {
+  if (!config.metavaultAddress) return 0n;
+
+  const [totalSupply, metavaultShares] = await Promise.all([
+    vault.getTotalSupply(),
+    vault.getBalanceOf(config.metavaultAddress),
+  ]);
+  const externalShares = totalSupply > metavaultShares ? totalSupply - metavaultShares : 0n;
+  if (externalShares === 0n) return 0n;
+
+  const [externalAssets, assetDecimals] = await Promise.all([
+    vault.convertToAssets(externalShares),
+    vault.getAssetDecimals(),
+  ]);
+
+  return toWad(externalAssets, assetDecimals);
+}
+
 async function _refreshBufferValues(data: KeeperRunData) {
   [data.bufferTotal, data.bufferTarget] = await Promise.all([
     vault.getBufferTotal(),
@@ -418,12 +457,23 @@ export function initArkKeeper(
   _settings = settings;
 }
 
-export function haltKeeper() {
-  halted = true;
+export function isArkHalted(address: Address): boolean {
+  return haltedArks.has(address);
+}
+
+export function haltKeeper(address?: Address) {
+  const ark = address ?? vault?.getAddress?.();
+  if (!ark || haltedArks.has(ark)) return;
+
+  haltedArks.add(ark);
   log.warn(
-    { event: 'ark_run_halted', ark: vault.getAddress() },
-    `ark run halting due to LUPBelowHTP error for ark ${vault.getAddress()}`,
+    { event: 'ark_run_halted', ark },
+    `ark run halting due to LUPBelowHTP error for ark ${ark}`,
   );
+}
+
+function isCurrentArkHalted(): boolean {
+  return isArkHalted(vault.getAddress());
 }
 
 // ============= Logging =============

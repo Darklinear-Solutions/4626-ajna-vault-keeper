@@ -1,8 +1,8 @@
-import { config, resolveArkSettings } from './config';
-import { log } from './logger';
+import { config, resolveArkSettings } from './config.ts';
+import { log } from './logger.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { metavaultRun } from '../keepers/metavaultKeeper';
-import { arkRun } from '../keepers/arkKeeper';
+import { metavaultRun } from '../keepers/metavaultKeeper.ts';
+import { arkRun } from '../keepers/arkKeeper.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 

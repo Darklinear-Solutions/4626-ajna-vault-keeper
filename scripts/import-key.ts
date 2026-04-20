@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
-import { encryptKeystore, writeKeystoreFile } from '../src/utils/keystore';
+import { encryptKeystore, writeKeystoreFile } from '../src/utils/keystore.ts';
 
 const DEFAULT_PATH = resolve('keystore', 'keeper-key.json');
 

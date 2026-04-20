@@ -1,10 +1,9 @@
-import { env } from '../utils/env';
-import { config } from '../utils/config';
-
-type OffchainPriceResponse = Record<string, { [currency: string]: number }>;
+import { env } from '../utils/env.ts';
+import { config } from '../utils/config.ts';
 
 const tier = env.ORACLE_API_TIER ?? 'none';
 const key = env.ORACLE_API_KEY ?? '';
+const MAX_OFFCHAIN_PRICE_LITERAL_LENGTH = 64;
 
 const headers: Record<string, string> = {
   accept: 'application/json',
@@ -12,15 +11,30 @@ const headers: Record<string, string> = {
   ...(tier === 'pro' && key && { 'x-cg-pro-api-key': key }),
 };
 
-export async function getOffchainPrice(): Promise<number> {
+export async function getOffchainPrice(): Promise<string> {
   const address = config.quoteTokenAddress;
 
   const res = await fetch(config.oracle.apiUrl as string, { method: 'GET', headers });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-  const json = (await res.json()) as OffchainPriceResponse;
-  const price = json[address]?.usd;
-  if (price === undefined) throw new Error('price is undefined');
+  const body = await res.text();
+  const price = _extractUsdPriceLiteral(body, address);
+  if (price == null) throw new Error('price is undefined or could not be parsed exactly');
 
   return price;
+}
+
+function _extractUsdPriceLiteral(body: string, address: string): string | undefined {
+  const escapedAddress = address.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const numberPattern = '(-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)';
+  const match = body
+    .toLowerCase()
+    .match(new RegExp(`"${escapedAddress}"\\s*:\\s*\\{[^{}]*"usd"\\s*:\\s*${numberPattern}`));
+
+  const literal = match?.[1];
+  if (!literal) return undefined;
+  if (literal.length > MAX_OFFCHAIN_PRICE_LITERAL_LENGTH) return undefined;
+  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(literal)) return undefined;
+
+  return literal;
 }

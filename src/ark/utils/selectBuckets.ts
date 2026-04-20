@@ -1,4 +1,4 @@
-import { type createVault } from '../vault';
+import { type createVault } from '../vault.ts';
 
 export type BucketMove = {
   bucket: bigint;
@@ -60,7 +60,7 @@ export async function selectBuckets(
   return moves;
 }
 
-function _wouldLeaveDust(
+export function _wouldLeaveDust(
   amount: bigint,
   bucketValue: bigint,
   bucketLps: bigint,

@@ -4,7 +4,6 @@ import { dirname } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { keccak256 as viemKeccak256 } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { log } from './logger';
 
 const KEYSTORE_VERSION = 3;
 const CIPHER = 'aes-128-ctr';
@@ -160,16 +159,7 @@ export async function promptPassword(message: string): Promise<string> {
 }
 
 export async function loadPrivateKeyFromKeystore(keystorePath: string): Promise<`0x${string}`> {
-  log.info({ event: 'keystore_load', path: keystorePath }, 'Loading private key from keystore');
-
   const keystore = await readKeystoreFile(keystorePath);
   const password = await promptPassword('Enter keystore password: ');
-  const privateKey = decryptKeystore(keystore, password);
-
-  log.info(
-    { event: 'keystore_decrypted', address: `0x${keystore.address}` },
-    'Keystore decrypted successfully',
-  );
-
-  return privateKey;
+  return decryptKeystore(keystore, password);
 }
