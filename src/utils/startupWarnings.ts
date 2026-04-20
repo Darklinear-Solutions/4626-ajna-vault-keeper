@@ -1,9 +1,9 @@
 import { config } from './config.ts';
-import { log } from './logger.ts';
+import { startupNoticeLog } from './logger.ts';
 
 export function logStartupWarnings(): void {
   if (!config.keeper.exitOnSubgraphFailure) {
-    log.warn(
+    startupNoticeLog.warn(
       {
         event: 'subgraph_fail_open_enabled',
       },
@@ -12,7 +12,7 @@ export function logStartupWarnings(): void {
   }
 
   if (config.oracle.onchainAddress && config.oracle.onchainMaxStaleness == null) {
-    log.warn(
+    startupNoticeLog.warn(
       {
         event: 'oracle_staleness_check_disabled',
         onchainAddress: config.oracle.onchainAddress,
@@ -23,7 +23,7 @@ export function logStartupWarnings(): void {
   }
 
   if (config.oracle.fixedPrice != null) {
-    log.warn(
+    startupNoticeLog.warn(
       {
         event: 'oracle_fixed_price_enabled',
         rawPrice: config.oracle.fixedPrice,

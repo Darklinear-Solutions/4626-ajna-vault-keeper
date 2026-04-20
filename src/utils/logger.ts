@@ -1,12 +1,24 @@
 import pino from 'pino';
 import { config } from './config.ts';
 
+const redact = ['env.PRIVATE_KEY', 'env.ORACLE_API_KEY', 'env.REMOTE_SIGNER_URL', 'env.RPC_URL'];
+const destination = pino.destination({ sync: true });
+
 export const log = pino(
   {
     level: config.keeper.logLevel ?? 'info',
-    redact: ['env.PRIVATE_KEY', 'env.ORACLE_API_KEY', 'env.REMOTE_SIGNER_URL', 'env.RPC_URL'],
+    redact,
   },
-  pino.destination({ sync: true }),
+  destination,
+);
+
+// Startup safety notices should remain visible even when the main logger is configured more strictly.
+export const startupNoticeLog = pino(
+  {
+    level: 'warn',
+    redact,
+  },
+  destination,
 );
 
 export function setUpCrashHandlers() {

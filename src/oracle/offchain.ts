@@ -3,6 +3,7 @@ import { config } from '../utils/config.ts';
 
 const tier = env.ORACLE_API_TIER ?? 'none';
 const key = env.ORACLE_API_KEY ?? '';
+const MAX_OFFCHAIN_PRICE_LITERAL_LENGTH = 64;
 
 const headers: Record<string, string> = {
   accept: 'application/json',
@@ -30,5 +31,10 @@ function _extractUsdPriceLiteral(body: string, address: string): string | undefi
     .toLowerCase()
     .match(new RegExp(`"${escapedAddress}"\\s*:\\s*\\{[^{}]*"usd"\\s*:\\s*${numberPattern}`));
 
-  return match?.[1];
+  const literal = match?.[1];
+  if (!literal) return undefined;
+  if (literal.length > MAX_OFFCHAIN_PRICE_LITERAL_LENGTH) return undefined;
+  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(literal)) return undefined;
+
+  return literal;
 }

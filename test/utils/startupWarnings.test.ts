@@ -24,7 +24,7 @@ describe('logStartupWarnings', () => {
       },
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({
-      log: { warn },
+      startupNoticeLog: { warn },
     }));
 
     const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
@@ -65,7 +65,7 @@ describe('logStartupWarnings', () => {
       },
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({
-      log: { warn },
+      startupNoticeLog: { warn },
     }));
 
     const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
@@ -92,7 +92,7 @@ describe('logStartupWarnings', () => {
       },
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({
-      log: { warn },
+      startupNoticeLog: { warn },
     }));
 
     const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
@@ -107,6 +107,38 @@ describe('logStartupWarnings', () => {
         onchainPrimary: false,
       }),
       expect.stringContaining('staleness checking is disabled'),
+    );
+  });
+
+  it('still emits startup notices when the main logger is configured at error level', async () => {
+    const warn = vi.fn();
+
+    vi.doMock('../../src/utils/config.ts', () => ({
+      config: {
+        keeper: {
+          exitOnSubgraphFailure: false,
+          logLevel: 'error',
+        },
+        oracle: {
+          onchainPrimary: true,
+          onchainMaxStaleness: 86400,
+          fixedPrice: null,
+        },
+      },
+    }));
+    vi.doMock('../../src/utils/logger.ts', () => ({
+      startupNoticeLog: { warn },
+      log: { error: vi.fn(), warn: vi.fn() },
+    }));
+
+    const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
+
+    logStartupWarnings();
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'subgraph_fail_open_enabled' }),
+      expect.stringContaining('fail-open'),
     );
   });
 });

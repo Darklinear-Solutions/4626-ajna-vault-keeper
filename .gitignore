@@ -1,8 +1,7 @@
-.vscode/
+.DS_Store
 node_modules/
 dist/
 dist-tools/
-.DS_Store
 .env*
 !.env.example
 .secrets
@@ -10,12 +9,6 @@ test/script/test-addresses.env
 broadcast/
 cache/
 out/
-.codeql-db
-codeql-results.sarif
 config.json
 /keystore/
 .claude/settings.local.json
-audit/
-mewt.sqlite
-CLAUDE.md
-.supply-chain-risk-auditor/
