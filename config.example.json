@@ -32,6 +32,10 @@
     "confirmations": 1
   },
 
+  "remoteSigner": {
+    "requestTimeoutMs": 30000
+  },
+
   "arks": [
     {
       "address": "0x0000000000000000000000000000000000000001",

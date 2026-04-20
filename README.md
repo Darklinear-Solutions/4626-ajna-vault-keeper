@@ -8,6 +8,9 @@
 - [In-Range Boundaries in Ajna](#in-range-boundaries-in-ajna)
 - [Technical Overview](#technical-overview)
   - [1. Configuration](#technical-overview-1-configuration)
+      - [Environment Variables](#environment-variables)
+      - [Credential Modes](#credential-modes)
+      - [Config Values](#config-values)
   - [2. Fetching State](#technical-overview-2-fetching-state)
   - [3. Early Fail or Skip Conditions](#technical-overview-3-early-fail-or-skip-conditions)
   - [4. Compute Targets](#technical-overview-4-compute-targets)
@@ -53,7 +56,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
 
 1. <a name="technical-overview-1-configuration"></a>Configuration is split between `.env` (secrets and infrastructure) and `config.json` (operational parameters). Secrets stay in `.env` and should never be committed. All other configuration lives in `config.json`.
 
-    **Environment variables (set in `.env`):**
+    <a name="environment-variables"></a>**Environment variables (set in `.env`):**
 
     | Variable                         | Description                                                                      | Type                     | Required/Optional                              | Default          |
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
@@ -64,21 +67,29 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | `KEYSTORE_PATH`                  | Path to an Ethereum V3 keystore file. If set, the keeper prompts for the password on startup. Best suited to local/operator use. | String (file path)       | Conditional (exactly one credential mode must be configured) | None             |
     | `REMOTE_SIGNER_URL`              | Web3Signer-compatible JSON-RPC endpoint used only for signing transactions. Reads, fee estimation, waits, and broadcast still use `RPC_URL`. | URL (`https://...`)      | Conditional (`REMOTE_SIGNER_URL` and `REMOTE_SIGNER_ADDRESS` must be set together as one credential mode) | None             |
     | `REMOTE_SIGNER_ADDRESS`          | EOA address exposed by the remote signer and used as `client.account.address`.   | Ethereum address (`0x...`) | Conditional (`REMOTE_SIGNER_URL` and `REMOTE_SIGNER_ADDRESS` must be set together as one credential mode) | None             |
+    | `REMOTE_SIGNER_ALLOW_INSECURE`   | Escape hatch that allows `REMOTE_SIGNER_URL` to use plaintext `http://`. Only the literal string `true` enables it. Intended for local testing; emits a startup warning when active. | Boolean (`true` only) | Optional | `false` |
+    | `REMOTE_SIGNER_AUTH_TOKEN`       | Optional bearer token sent as `Authorization: Bearer <token>` on every signer request. Useful when the signer (or a fronting proxy) requires a static token or API key. Redacted from logs. | String                   | Optional                                       | None             |
+    | `REMOTE_SIGNER_TLS_CLIENT_CERT`  | Path to a PEM file containing the client certificate the keeper presents to the signer for mTLS. Must be set together with `REMOTE_SIGNER_TLS_CLIENT_KEY`. | String (file path)       | Optional (paired with `REMOTE_SIGNER_TLS_CLIENT_KEY`) | None             |
+    | `REMOTE_SIGNER_TLS_CLIENT_KEY`   | Path to a PEM file containing the client private key matching `REMOTE_SIGNER_TLS_CLIENT_CERT`. | String (file path)       | Optional (paired with `REMOTE_SIGNER_TLS_CLIENT_CERT`) | None             |
+    | `REMOTE_SIGNER_TLS_CLIENT_KEY_PASSWORD` | Optional passphrase for an encrypted client key. Only allowed when `REMOTE_SIGNER_TLS_CLIENT_KEY` is set. Redacted from logs. | String                   | Optional                                       | None             |
+    | `REMOTE_SIGNER_TLS_CA`           | Path to a PEM file containing CA certificate(s) used to verify the signer's server certificate. Useful when the signer is issued by a private CA. When set, this **replaces** Node's default trust store (it does not augment it); concatenate the system CA bundle into the file if you also need to trust public CAs. When omitted, Node's default trust store is used. | String (file path)       | Optional                                       | None             |
     | `ORACLE_API_KEY`                 | CoinGecko API key.                                                               | String                   | Optional                                       | None             |
     | `ORACLE_API_TIER`                | CoinGecko tier (`demo`, `pro`).                                                  | String                   | Conditional (if `ORACLE_API_KEY` set)          | None             |
     | `MAINNET_RPC_URL`                | Since the RPC node defined here may refer to any chain, the test suite needs a mainnet RPC for set up. By default, the test suite uses the free node at 'https://eth.drpc.org', but this node is rate-limited, which may cause unexpected test failures. To avoid this, another RPC can be defined here. | String | Optional | None |
 
-    **Credential modes (mutually exclusive):**
+    <a name="credential-modes"></a>**Credential modes (mutually exclusive):**
 
     | Mode | Variables | Recommended use |
     | ---- | --------- | --------------- |
-    | Remote signer | `REMOTE_SIGNER_URL` + `REMOTE_SIGNER_ADDRESS` | Preferred production posture where available. The keeper talks to a Web3Signer-compatible signer service, so the signing key can stay externalized or non-extractable. |
+    | Remote signer | `REMOTE_SIGNER_URL` + `REMOTE_SIGNER_ADDRESS` | Preferred production posture where available. The keeper talks to a Web3Signer-compatible signer service, so the signing key can stay externalized. |
     | Local keystore | `KEYSTORE_PATH` | Local/operator mode. Startup is interactive: the keystore password is prompted on boot. |
     | Raw private key | `PRIVATE_KEY` | Headless fallback when the deployer must inject the key directly from a secret manager. |
 
-    Remote signer mode is the strongest supported production posture in this repo. Direct AWS KMS integration is not implemented in the keeper itself, but AWS KMS, Vault, and similar custody systems can back a compatible signer service. The minimum expectation is a reachable Web3Signer-compatible JSON-RPC endpoint that signs for the EOA configured in `REMOTE_SIGNER_ADDRESS`. The signer endpoint should stay on a restricted internal network or equivalent access-controlled path, not on the public internet.
+    Remote signer mode is the strongest supported production posture in this repo. Direct AWS KMS integration is not implemented in the keeper itself, but AWS KMS, Vault, and similar custody systems can back a compatible signer service. The minimum expectation is a reachable Web3Signer-compatible JSON-RPC endpoint that signs for the EOA configured in `REMOTE_SIGNER_ADDRESS`. The signer must have `eth_sign` enabled for the keeper EOA, since the keeper performs an `eth_sign`-based identity verification at startup and will fail to boot if the signer rejects it. The keeper enforces `https` on `REMOTE_SIGNER_URL` by default; plaintext `http` is rejected at startup unless `REMOTE_SIGNER_ALLOW_INSECURE=true` is set as a deliberate escape hatch for local testing. The signer endpoint should stay on a restricted internal network or equivalent access-controlled path, not on the public internet.
 
-    **Config values (set in `config.json`):**
+    Two transport-layer auth options are supported and can be combined. `REMOTE_SIGNER_AUTH_TOKEN` adds an `Authorization: Bearer <token>` header to every signer request and is the simplest posture, well suited to deployments where an auth-terminating proxy or the signer itself accepts a static token or API key. mTLS via the `REMOTE_SIGNER_TLS_*` variables is the strongest posture and matches the standard production setup for Web3Signer: the keeper presents a client certificate (`CERT` + `KEY`, optionally encrypted with `KEY_PASSWORD`) and may verify the signer with a private CA bundle (`CA`). All TLS material must be provided as PEM files; if you have a PKCS#12 keystore you can extract PEM with `openssl pkcs12 -in keystore.p12 -out client.pem`. Use the bearer token when the signer or its proxy already terminates auth itself, and prefer mTLS when the signer is reachable directly and supports it. Combining `REMOTE_SIGNER_AUTH_TOKEN` with `REMOTE_SIGNER_ALLOW_INSECURE` sends the token over plaintext http, so that combination should be limited to local testing.
+
+    <a name="config-values"></a>**Config values (set in `config.json`):**
 
     | Config Key                       | Description                                                                      | Type                     | Required/Optional                              | Default          |
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
@@ -98,6 +109,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | `transaction.gasBuffer`          | Accounts for occasional Viem gas underestimation for the functions that interact with Ajna, resulting in sporadic `OutOfGas` reversions. | Integer (percentage)     | Optional                                       | 50 (50%)         |
     | `transaction.defaultGas`         | Default gas limit in the event that gas estimation with the above buffer fails.  | Integer                  | Optional                                       | 1,500,000        |
     | `transaction.confirmations`      | Number of block confirmations to wait for each tx.                               | Integer                  | Required                                       | N/A              |
+    | `remoteSigner.requestTimeoutMs`  | Per-request timeout applied to every remote signer JSON-RPC call. Bounded above by `keeper.intervalMs` so a hung signer cannot pin the keeper across runs. Only consulted when remote signer credential mode is in use. | Integer (milliseconds) | Optional                                       | 30,000 (30s)     |
     | `arkGlobal.optimalBucketDiff`    | Offset (in bucket indexes) from current pool price to select the optimal bucket. Can also be set per ARK. | Integer | Conditional (required globally or per ARK) | None             |
     | `arkGlobal.bufferPadding`        | Accounts for the slight variation in the value of `totalAssets` (due to interest accruing in Ajna). | String (`WAD`)  | Optional                                       | `"100000000000000"` (1e14) |
     | `arkGlobal.minMoveAmount`        | Skip moves if bucket's quote token balance is below this amount (dust limit) - enforced by vault. | String (`WAD` units)    | Optional                                       | `"1000001"`      |

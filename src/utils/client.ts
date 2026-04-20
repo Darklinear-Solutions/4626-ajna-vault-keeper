@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import {
   createWalletClient,
   createPublicClient,
@@ -8,6 +9,7 @@ import {
 } from 'viem';
 import * as allChains from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
+import { Agent } from 'undici';
 import { credentialMode, env } from './env.ts';
 import { config } from './config.ts';
 import { log } from './logger.ts';
@@ -61,6 +63,38 @@ type Clients = ReturnType<typeof buildClients>;
 export let client: Clients['walletClient'];
 export let readOnlyClient: Clients['publicClient'];
 let remoteSignerIdentityVerified = false;
+let remoteSignerDispatcher: Agent | undefined;
+
+function getRemoteSignerDispatcher(): Agent | undefined {
+  if (remoteSignerDispatcher !== undefined) return remoteSignerDispatcher;
+
+  const cert = env.REMOTE_SIGNER_TLS_CLIENT_CERT;
+  const key = env.REMOTE_SIGNER_TLS_CLIENT_KEY;
+  const ca = env.REMOTE_SIGNER_TLS_CA;
+
+  if (!cert && !key && !ca) return undefined;
+
+  const connect: Record<string, unknown> = {};
+  if (cert) connect.cert = readFileSync(cert);
+  if (key) connect.key = readFileSync(key);
+  if (env.REMOTE_SIGNER_TLS_CLIENT_KEY_PASSWORD) {
+    connect.passphrase = env.REMOTE_SIGNER_TLS_CLIENT_KEY_PASSWORD;
+  }
+  if (ca) connect.ca = readFileSync(ca);
+
+  remoteSignerDispatcher = new Agent({ connect });
+  return remoteSignerDispatcher;
+}
+
+function buildRemoteSignerConfig() {
+  return {
+    address: env.REMOTE_SIGNER_ADDRESS as `0x${string}`,
+    authToken: env.REMOTE_SIGNER_AUTH_TOKEN,
+    dispatcher: getRemoteSignerDispatcher(),
+    timeoutMs: config.remoteSigner.requestTimeoutMs,
+    url: env.REMOTE_SIGNER_URL!,
+  };
+}
 
 function setClients(account: Account): void {
   const built = buildClients(account);
@@ -74,10 +108,7 @@ function createImmediateAccount(): Account | null {
   }
 
   if (credentialMode === 'remoteSigner') {
-    return createRemoteSignerAccount({
-      address: env.REMOTE_SIGNER_ADDRESS as `0x${string}`,
-      url: env.REMOTE_SIGNER_URL!,
-    });
+    return createRemoteSignerAccount(buildRemoteSignerConfig());
   }
 
   return null;
@@ -116,10 +147,7 @@ export async function initClient(): Promise<void> {
   }
 
   if (credentialMode === 'remoteSigner' && !remoteSignerIdentityVerified) {
-    await verifyRemoteSignerIdentity({
-      address: env.REMOTE_SIGNER_ADDRESS as `0x${string}`,
-      url: env.REMOTE_SIGNER_URL!,
-    });
+    await verifyRemoteSignerIdentity(buildRemoteSignerConfig());
     log.info(
       { event: 'remote_signer_identity_verified', address: env.REMOTE_SIGNER_ADDRESS },
       'Remote signer identity verified',

@@ -1,8 +1,9 @@
+import type { Dispatcher } from 'undici';
 import {
   bytesToHex,
   getTransactionType,
   isAddressEqual,
-  parseSignature,
+  parseTransaction,
   recoverMessageAddress,
   recoverTransactionAddress,
   serializeTransaction,
@@ -10,6 +11,7 @@ import {
   toHex,
   type Address,
   type Hex,
+  type Signature,
   type SignableMessage,
   type TransactionSerializable,
   type TypedData,
@@ -19,6 +21,9 @@ import { toAccount } from 'viem/accounts';
 
 type RemoteSignerConfig = {
   address: Address;
+  authToken?: string | undefined;
+  dispatcher?: Dispatcher | undefined;
+  timeoutMs: number;
   url: string;
 };
 
@@ -87,19 +92,54 @@ function toRemoteSignerTransaction(address: Address, transaction: TransactionSer
   };
 }
 
-async function requestRemoteSigner<T>(url: string, method: string, params: unknown[]): Promise<T> {
-  const response = await fetch(url, {
-    body: JSON.stringify({
-      id: ++requestId,
-      jsonrpc: '2.0',
-      method,
-      params,
-    }),
-    headers: {
-      'content-type': 'application/json',
-    },
+function isPrimitiveErrorData(data: unknown): data is bigint | boolean | number | string {
+  const type = typeof data;
+  return type === 'string' || type === 'number' || type === 'boolean' || type === 'bigint';
+}
+
+function hasJsonContentType(contentType: string | null | undefined): boolean {
+  if (contentType == null) return false;
+  return contentType.toLowerCase().split(';')[0]!.trim() === 'application/json';
+}
+
+function isJsonRpcResponse<T>(payload: unknown): payload is JsonRpcResponse<T> {
+  if (payload == null || typeof payload !== 'object') return false;
+  return 'result' in payload || 'error' in payload;
+}
+
+async function requestRemoteSigner<T>(
+  config: RemoteSignerConfig,
+  method: string,
+  params: unknown[],
+): Promise<T> {
+  const { authToken, dispatcher, timeoutMs, url } = config;
+  const id = ++requestId;
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+
+  if (authToken) {
+    headers.authorization = `Bearer ${authToken}`;
+  }
+
+  const fetchOptions = {
+    body: JSON.stringify({ id, jsonrpc: '2.0', method, params }),
+    headers,
     method: 'POST',
-  });
+    redirect: 'error',
+    signal: AbortSignal.timeout(timeoutMs),
+    ...(dispatcher ? { dispatcher } : {}),
+  } as unknown as RequestInit;
+
+  let response: Response;
+  try {
+    response = await fetch(url, fetchOptions);
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new Error(`Remote signer request timed out (${method}) after ${timeoutMs}ms`, {
+        cause: err,
+      });
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     throw new Error(
@@ -107,10 +147,45 @@ async function requestRemoteSigner<T>(url: string, method: string, params: unkno
     );
   }
 
-  const payload = (await response.json()) as JsonRpcResponse<T>;
+  const contentType = response.headers.get('content-type');
+
+  if (!hasJsonContentType(contentType)) {
+    throw new Error(
+      `Remote signer request returned non-JSON content type (${method}): expected application/json, got ${contentType ?? 'no content-type header'}`,
+    );
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (cause) {
+    throw new Error(`Remote signer request returned invalid JSON (${method})`, { cause });
+  }
+
+  if (!isJsonRpcResponse<T>(payload)) {
+    throw new Error(
+      `Remote signer request returned an unexpected response shape (${method}): missing both 'result' and 'error'`,
+    );
+  }
 
   if ('error' in payload) {
-    throw new Error(`Remote signer request failed (${method}): ${payload.error.message}`);
+    const { code, data, message } = payload.error;
+    const detail = isPrimitiveErrorData(data)
+      ? ` (code ${code}, data ${String(data)})`
+      : ` (code ${code})`;
+
+    throw Object.assign(
+      new Error(`Remote signer request failed (${method}): ${message}${detail}`),
+      {
+        rpcError: payload.error,
+      },
+    );
+  }
+
+  if (payload.id !== id) {
+    throw new Error(
+      `Remote signer request id mismatch (${method}): expected ${id}, got ${String(payload.id)}`,
+    );
   }
 
   return payload.result;
@@ -128,17 +203,50 @@ function assertRecoveredAddressMatchesExpected(
   }
 }
 
+function extractSignatureFromSignedTransaction(signedTransactionHex: Hex): Signature {
+  let parsed;
+  try {
+    parsed = parseTransaction(signedTransactionHex);
+  } catch (cause) {
+    throw new Error(
+      `Remote signer eth_signTransaction response is not a valid RLP-encoded signed transaction`,
+      { cause },
+    );
+  }
+
+  const { r, s, yParity, v } = parsed;
+
+  if (r == null || s == null) {
+    throw new Error(
+      `Remote signer eth_signTransaction response is missing signature fields (r, s)`,
+    );
+  }
+
+  if (yParity != null) {
+    return { r, s, yParity };
+  }
+
+  if (v != null) {
+    return { r, s, v };
+  }
+
+  throw new Error(
+    `Remote signer eth_signTransaction response is missing signature fields (yParity, v)`,
+  );
+}
+
 async function requestVerifiedMessageSignature(
-  { address, url }: RemoteSignerConfig,
+  config: RemoteSignerConfig,
   message: SignableMessage,
 ): Promise<Hex> {
-  const signature = await requestRemoteSigner<Hex>(url, 'eth_sign', [
-    address,
+  // eth_sign is safe here: the EIP-191 prefix prevents the signature from being reinterpreted as a transaction or typed data.
+  const signature = await requestRemoteSigner<Hex>(config, 'eth_sign', [
+    config.address,
     toSignableHex(message),
   ]);
   const recoveredAddress = await recoverMessageAddress({ message, signature });
 
-  assertRecoveredAddressMatchesExpected(address, recoveredAddress, 'message');
+  assertRecoveredAddressMatchesExpected(config.address, recoveredAddress, 'message');
   return signature;
 }
 
@@ -146,18 +254,21 @@ export async function verifyRemoteSignerIdentity(config: RemoteSignerConfig): Pr
   await requestVerifiedMessageSignature(config, REMOTE_SIGNER_IDENTITY_MESSAGE);
 }
 
-export function createRemoteSignerAccount({ address, url }: RemoteSignerConfig) {
+export function createRemoteSignerAccount(config: RemoteSignerConfig) {
+  const { address } = config;
+
   return toAccount({
     address,
     async signMessage({ message }) {
-      return requestVerifiedMessageSignature({ address, url }, message);
+      return requestVerifiedMessageSignature(config, message);
     },
     async signTransaction(transaction, { serializer } = {}) {
-      const signatureHex = await requestRemoteSigner<Hex>(url, 'eth_signTransaction', [
+      const signedTransactionHex = await requestRemoteSigner<Hex>(config, 'eth_signTransaction', [
         toRemoteSignerTransaction(address, transaction),
       ]);
-      const signature = parseSignature(signatureHex);
-      const signedTransaction = serializeTransaction(transaction, signature) as Parameters<
+      const signature = extractSignatureFromSignedTransaction(signedTransactionHex);
+      const serialize = serializer ?? serializeTransaction;
+      const signedTransaction = serialize(transaction, signature) as Parameters<
         typeof recoverTransactionAddress
       >[0]['serializedTransaction'];
       const recoveredAddress = await recoverTransactionAddress({
@@ -165,7 +276,7 @@ export function createRemoteSignerAccount({ address, url }: RemoteSignerConfig) 
       });
 
       assertRecoveredAddressMatchesExpected(address, recoveredAddress, 'transaction');
-      return (serializer ?? serializeTransaction)(transaction, signature);
+      return signedTransaction;
     },
     async signTypedData<
       const typedData extends TypedData | Record<string, unknown>,

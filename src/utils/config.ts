@@ -55,6 +55,10 @@ type RawConfig = {
     confirmations: number;
   };
 
+  remoteSigner?: {
+    requestTimeoutMs?: number;
+  };
+
   arks: ArkConfig[];
   buffer: {
     address: Address;
@@ -66,6 +70,7 @@ type RawConfig = {
 // ============= Parse & Validate =============
 
 export const DEFAULT_ONCHAIN_MAX_STALENESS = 86400;
+export const DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS = 30000;
 
 const CONFIG_PATH = process.env.CONFIG_PATH
   ? resolve(process.env.CONFIG_PATH)
@@ -138,6 +143,26 @@ if (
   throw new Error('config.json: oracle.onchainMaxStaleness must be a positive integer or null');
 }
 
+if (raw.remoteSigner !== undefined) {
+  if (typeof raw.remoteSigner !== 'object' || raw.remoteSigner === null) {
+    throw new Error('config.json: remoteSigner must be an object when provided');
+  }
+  if (raw.remoteSigner.requestTimeoutMs !== undefined) {
+    const value = raw.remoteSigner.requestTimeoutMs;
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error('config.json: remoteSigner.requestTimeoutMs must be a positive integer');
+    }
+    if (value > raw.keeper.intervalMs) {
+      throw new Error(
+        `config.json: remoteSigner.requestTimeoutMs (${value}) must not exceed keeper.intervalMs (${raw.keeper.intervalMs})`,
+      );
+    }
+  }
+}
+
+raw.remoteSigner ??= {};
+raw.remoteSigner.requestTimeoutMs ??= DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS;
+
 raw.keeper.exitOnSubgraphFailure ??= true;
 raw.oracle.futureSkewTolerance ??= 120;
 raw.arkGlobal.bufferPadding ??= '100000000000000';
@@ -192,6 +217,7 @@ export const config = {
   oracle: raw.oracle as Required<RawConfig['oracle']>,
   arkGlobal: raw.arkGlobal as Required<RawConfig['arkGlobal']>,
   transaction: raw.transaction as Required<RawConfig['transaction']>,
+  remoteSigner: raw.remoteSigner as Required<NonNullable<RawConfig['remoteSigner']>>,
   quoteTokenAddress: raw.quoteTokenAddress.toLowerCase() as Address,
   metavaultAddress: (raw.metavaultAddress || undefined) as Address | undefined,
   defaultGas: BigInt(raw.transaction.defaultGas!),

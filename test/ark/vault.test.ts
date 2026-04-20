@@ -92,8 +92,6 @@ describe('vault operations', () => {
   });
 
   it('can move between buckets', async () => {
-    // Fork-backed bucket valuations occasionally drift by a few wei after the move settles,
-    // so assert a tight absolute tolerance around the requested move amount.
     const moveTolerance = 10n;
     const toIndex = htpIndex - 1n;
 
@@ -133,6 +131,7 @@ describe('vault operations', () => {
   });
 
   it('can move from bucket to buffer', async () => {
+    const moveTolerance = 10n;
     await setBufferRatio(0n);
 
     const [beforeBufferBalance, beforeHtpQts] = await Promise.all([
@@ -157,11 +156,16 @@ describe('vault operations', () => {
     const bufferDelta: bigint = afterBufferBalance - beforeBufferBalance;
     const htpDelta = beforeHtpQts - afterHtpQts;
 
-    expect(absoluteDifference(htpDelta, bufferDelta)).toBeLessThanOrEqual(3n);
+    expect(htpDelta).toBeGreaterThan(0n);
+    expect(absoluteDifference(bufferDelta, htpDelta)).toBeLessThanOrEqual(moveTolerance);
+    expect(absoluteDifference(htpDelta, toAssets)).toBeLessThanOrEqual(moveTolerance);
+    expect(absoluteDifference(bufferDelta, toAssets)).toBeLessThanOrEqual(moveTolerance);
     expect(bufferDelta).toBeGreaterThan(0n);
   });
 
   it('can move from buffer to bucket', async () => {
+    const moveTolerance = 300000n;
+
     const [afterBufferBalance, afterHtpQts] = await Promise.all([
       vault.getBufferTotal(),
       vault.lpToValue(htpIndex),
@@ -170,7 +174,10 @@ describe('vault operations', () => {
     const htpDelta = afterHtpQts - initialHtpQts;
     const bufferDelta = initialBufferBalance - afterBufferBalance;
 
-    expect(absoluteDifference(bufferDelta, htpDelta)).toBeLessThanOrEqual(300000n);
+    expect(bufferDelta).toBeGreaterThan(0n);
+    expect(absoluteDifference(htpDelta, bufferDelta)).toBeLessThanOrEqual(moveTolerance);
+    expect(absoluteDifference(bufferDelta, assets)).toBeLessThanOrEqual(moveTolerance);
+    expect(absoluteDifference(htpDelta, assets)).toBeLessThanOrEqual(moveTolerance);
     expect(htpDelta).toBeGreaterThan(0n);
   });
 });

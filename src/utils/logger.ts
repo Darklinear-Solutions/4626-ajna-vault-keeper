@@ -1,7 +1,14 @@
 import pino from 'pino';
 import { config } from './config.ts';
 
-const redact = ['env.PRIVATE_KEY', 'env.ORACLE_API_KEY', 'env.REMOTE_SIGNER_URL', 'env.RPC_URL'];
+const redact = [
+  'env.PRIVATE_KEY',
+  'env.ORACLE_API_KEY',
+  'env.REMOTE_SIGNER_URL',
+  'env.REMOTE_SIGNER_AUTH_TOKEN',
+  'env.REMOTE_SIGNER_TLS_CLIENT_KEY_PASSWORD',
+  'env.RPC_URL',
+];
 const destination = pino.destination({ sync: true });
 
 export const log = pino(
