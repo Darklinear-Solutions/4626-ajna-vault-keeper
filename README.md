@@ -17,6 +17,7 @@
   - [5. Execute Rebalancing](#technical-overview-5-execute-rebalancing)
   - [6. Housekeeping and Telemetry](#technical-overview-6-housekeeping-and-telemetry)
 - [Local Set Up](#local-set-up)
+- [Docker](#docker)
 - [Configure Environment](#configure-environment)
 - [Deployment Requirements](#deployment-requirements)
 - [Operator Responsibilities](#operator-responsibilities)
@@ -273,7 +274,7 @@ pnpm import-key
 
 This will prompt for the private key and a password, then write the encrypted keystore file. Set `KEYSTORE_PATH` in `.env` to the path of the generated file. On startup, the keeper will prompt for the password to decrypt it.
 
-#### Docker:
+## <a name="docker"></a>Docker
 
 The Docker image only contains the compiled keeper and its production dependencies. It does not bake `.env` or `config.json` into build layers or the final runtime image.
 
@@ -317,6 +318,19 @@ docker run --rm \
   -v "$PWD/config.json:/app/config.json:ro" \
   -v "$PWD/keystore/keeper-key.json:/secrets/keeper-key.json:ro" \
   -it \
+  ajna-erc4626-keeper
+```
+
+If you use the remote signer with mTLS, mount the PEM files (and any private CA bundle) into the container and point the `REMOTE_SIGNER_TLS_*` variables at the in-container paths. Prefer mounting a directory read-only over mounting individual files. For example:
+
+```
+docker run --rm \
+  --env-file .env \
+  -e REMOTE_SIGNER_TLS_CLIENT_CERT=/etc/keeper/tls/client.pem \
+  -e REMOTE_SIGNER_TLS_CLIENT_KEY=/etc/keeper/tls/client.key \
+  -e REMOTE_SIGNER_TLS_CA=/etc/keeper/tls/ca.pem \
+  -v "$PWD/config.json:/app/config.json:ro" \
+  -v "$PWD/tls:/etc/keeper/tls:ro" \
   ajna-erc4626-keeper
 ```
 
