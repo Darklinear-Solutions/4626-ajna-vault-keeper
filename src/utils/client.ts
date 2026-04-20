@@ -12,7 +12,7 @@ import { credentialMode, env } from './env.ts';
 import { config } from './config.ts';
 import { log } from './logger.ts';
 import { loadPrivateKeyFromKeystore } from './keystore.ts';
-import { createRemoteSignerAccount } from './remoteSigner.ts';
+import { createRemoteSignerAccount, verifyRemoteSignerIdentity } from './remoteSigner.ts';
 
 const transport = process.env.TEST_ENV === 'true' ? 'http://127.0.0.1:8545' : env.RPC_URL;
 
@@ -60,6 +60,7 @@ type Clients = ReturnType<typeof buildClients>;
 
 export let client: Clients['walletClient'];
 export let readOnlyClient: Clients['publicClient'];
+let remoteSignerIdentityVerified = false;
 
 function setClients(account: Account): void {
   const built = buildClients(account);
@@ -110,7 +111,19 @@ if (immediateAccount) {
 }
 
 export async function initClient(): Promise<void> {
-  if (client) return;
+  if (!client) {
+    setClients(await loadAccount());
+  }
 
-  setClients(await loadAccount());
+  if (credentialMode === 'remoteSigner' && !remoteSignerIdentityVerified) {
+    await verifyRemoteSignerIdentity({
+      address: env.REMOTE_SIGNER_ADDRESS as `0x${string}`,
+      url: env.REMOTE_SIGNER_URL!,
+    });
+    log.info(
+      { event: 'remote_signer_identity_verified', address: env.REMOTE_SIGNER_ADDRESS },
+      'Remote signer identity verified',
+    );
+    remoteSignerIdentityVerified = true;
+  }
 }

@@ -121,12 +121,14 @@ if (!raw.oracle.onchainPrimary && raw.oracle.fixedPrice == null) {
     );
 }
 
-if (raw.oracle.onchainPrimary && !raw.oracle.onchainAddress) {
+const hasOnchainOracle = Boolean(raw.oracle.onchainAddress);
+
+if (raw.oracle.onchainPrimary && !hasOnchainOracle) {
   throw new Error('config.json: oracle.onchainAddress is required when onchainPrimary is true');
 }
 
 if (raw.oracle.onchainMaxStaleness === undefined) {
-  raw.oracle.onchainMaxStaleness = raw.oracle.onchainPrimary ? DEFAULT_ONCHAIN_MAX_STALENESS : null;
+  raw.oracle.onchainMaxStaleness = hasOnchainOracle ? DEFAULT_ONCHAIN_MAX_STALENESS : null;
 }
 
 if (

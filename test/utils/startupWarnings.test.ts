@@ -16,6 +16,7 @@ describe('logStartupWarnings', () => {
           exitOnSubgraphFailure: false,
         },
         oracle: {
+          onchainAddress: '0x0000000000000000000000000000000000000002',
           onchainPrimary: true,
           onchainMaxStaleness: null,
           fixedPrice: '1.00',
@@ -72,5 +73,40 @@ describe('logStartupWarnings', () => {
     logStartupWarnings();
 
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('warns when an offchain-primary setup disables staleness checks on its onchain fallback', async () => {
+    const warn = vi.fn();
+
+    vi.doMock('../../src/utils/config.ts', () => ({
+      config: {
+        keeper: {
+          exitOnSubgraphFailure: true,
+        },
+        oracle: {
+          onchainAddress: '0x0000000000000000000000000000000000000002',
+          onchainPrimary: false,
+          onchainMaxStaleness: null,
+          fixedPrice: null,
+        },
+      },
+    }));
+    vi.doMock('../../src/utils/logger.ts', () => ({
+      log: { warn },
+    }));
+
+    const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
+
+    logStartupWarnings();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'oracle_staleness_check_disabled',
+        onchainAddress: '0x0000000000000000000000000000000000000002',
+        onchainPrimary: false,
+      }),
+      expect.stringContaining('staleness checking is disabled'),
+    );
   });
 });

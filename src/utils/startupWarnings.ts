@@ -11,10 +11,11 @@ export function logStartupWarnings(): void {
     );
   }
 
-  if (config.oracle.onchainPrimary && config.oracle.onchainMaxStaleness == null) {
+  if (config.oracle.onchainAddress && config.oracle.onchainMaxStaleness == null) {
     log.warn(
       {
         event: 'oracle_staleness_check_disabled',
+        onchainAddress: config.oracle.onchainAddress,
         onchainPrimary: config.oracle.onchainPrimary,
       },
       'onchain oracle staleness checking is disabled via explicit config override',

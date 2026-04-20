@@ -1,7 +1,10 @@
 import {
   bytesToHex,
   getTransactionType,
+  isAddressEqual,
   parseSignature,
+  recoverMessageAddress,
+  recoverTransactionAddress,
   serializeTransaction,
   stringToHex,
   toHex,
@@ -38,6 +41,7 @@ type JsonRpcFailure = {
 type JsonRpcResponse<T> = JsonRpcFailure | JsonRpcSuccess<T>;
 
 let requestId = 0;
+const REMOTE_SIGNER_IDENTITY_MESSAGE = '4626-ajna-vault-keeper remote signer identity check';
 
 function toSignableHex(message: SignableMessage): Hex {
   if (typeof message === 'string') return stringToHex(message);
@@ -112,18 +116,55 @@ async function requestRemoteSigner<T>(url: string, method: string, params: unkno
   return payload.result;
 }
 
+function assertRecoveredAddressMatchesExpected(
+  expectedAddress: Address,
+  recoveredAddress: Address,
+  scope: 'message' | 'transaction',
+) {
+  if (!isAddressEqual(recoveredAddress, expectedAddress)) {
+    throw new Error(
+      `Remote signer ${scope} signature recovered ${recoveredAddress}, expected ${expectedAddress}`,
+    );
+  }
+}
+
+async function requestVerifiedMessageSignature(
+  { address, url }: RemoteSignerConfig,
+  message: SignableMessage,
+): Promise<Hex> {
+  const signature = await requestRemoteSigner<Hex>(url, 'eth_sign', [
+    address,
+    toSignableHex(message),
+  ]);
+  const recoveredAddress = await recoverMessageAddress({ message, signature });
+
+  assertRecoveredAddressMatchesExpected(address, recoveredAddress, 'message');
+  return signature;
+}
+
+export async function verifyRemoteSignerIdentity(config: RemoteSignerConfig): Promise<void> {
+  await requestVerifiedMessageSignature(config, REMOTE_SIGNER_IDENTITY_MESSAGE);
+}
+
 export function createRemoteSignerAccount({ address, url }: RemoteSignerConfig) {
   return toAccount({
     address,
     async signMessage({ message }) {
-      return requestRemoteSigner<Hex>(url, 'eth_sign', [address, toSignableHex(message)]);
+      return requestVerifiedMessageSignature({ address, url }, message);
     },
     async signTransaction(transaction, { serializer } = {}) {
       const signatureHex = await requestRemoteSigner<Hex>(url, 'eth_signTransaction', [
         toRemoteSignerTransaction(address, transaction),
       ]);
       const signature = parseSignature(signatureHex);
+      const signedTransaction = serializeTransaction(transaction, signature) as Parameters<
+        typeof recoverTransactionAddress
+      >[0]['serializedTransaction'];
+      const recoveredAddress = await recoverTransactionAddress({
+        serializedTransaction: signedTransaction,
+      });
 
+      assertRecoveredAddressMatchesExpected(address, recoveredAddress, 'transaction');
       return (serializer ?? serializeTransaction)(transaction, signature);
     },
     async signTypedData<

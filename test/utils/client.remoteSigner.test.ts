@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { privateKeyToAccount } from 'viem/accounts';
-import { type Signature, type TransactionSerializable } from 'viem';
+import {
+  parseTransaction,
+  signatureToHex,
+  type Signature,
+  type TransactionSerializable,
+} from 'viem';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -83,8 +88,27 @@ describe('client credential selection', () => {
 
 describe('remote signer account', () => {
   it('signs keeper transactions through eth_signTransaction and serializes them locally', async () => {
-    const signatureHex =
-      '0xa6122e277f46fea78f3e97d3354a03ad20b2296733dfefbadc7305c80e70ce9826d44f12ab5aa488689744657491c70d3b654d7f60f8f50beefac9abcf02a4cf1b' as const;
+    const signer = privateKeyToAccount(
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+    );
+    const transaction = {
+      chainId: 1,
+      data: '0x1234',
+      gas: 21000n,
+      maxFeePerGas: 20n,
+      maxPriorityFeePerGas: 2n,
+      nonce: 7,
+      to: '0x00000000000000000000000000000000000000b2',
+      type: 'eip1559',
+      value: 0n,
+    } satisfies TransactionSerializable;
+    const signedTransaction = await signer.signTransaction(transaction);
+    const parsedTransaction = parseTransaction(signedTransaction);
+    const signatureHex = signatureToHex({
+      r: parsedTransaction.r!,
+      s: parsedTransaction.s!,
+      yParity: parsedTransaction.yParity!,
+    });
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -101,20 +125,9 @@ describe('remote signer account', () => {
     const { createRemoteSignerAccount } = await import('../../src/utils/remoteSigner.ts');
 
     const account = createRemoteSignerAccount({
-      address: '0x00000000000000000000000000000000000000A1',
+      address: signer.address,
       url: 'https://signer.example',
     });
-    const transaction = {
-      chainId: 1,
-      data: '0x1234',
-      gas: 21000n,
-      maxFeePerGas: 20n,
-      maxPriorityFeePerGas: 2n,
-      nonce: 7,
-      to: '0x00000000000000000000000000000000000000B2',
-      type: 'eip1559',
-      value: 0n,
-    } satisfies TransactionSerializable;
     const serializer = vi.fn((request: TransactionSerializable, signature?: Signature) => {
       expect(request).toMatchObject(transaction);
       expect(signature).toEqual(
@@ -141,16 +154,101 @@ describe('remote signer account', () => {
         {
           chainId: '0x1',
           data: '0x1234',
-          from: '0x00000000000000000000000000000000000000A1',
+          from: signer.address,
           gas: '0x5208',
           maxFeePerGas: '0x14',
           maxPriorityFeePerGas: '0x2',
           nonce: '0x7',
-          to: '0x00000000000000000000000000000000000000B2',
+          to: '0x00000000000000000000000000000000000000b2',
           type: '0x2',
           value: '0x0',
         },
       ],
     });
+  });
+
+  it('rejects transaction signatures that recover to a different address', async () => {
+    const configuredAddress = '0x00000000000000000000000000000000000000A1' as const;
+    const wrongSigner = privateKeyToAccount(
+      '0x59c6995e998f97a5a0044966f094538c5f6d2e7d31be9c4754b150f8f7f7b1d8',
+    );
+    const transaction = {
+      chainId: 1,
+      data: '0x1234',
+      gas: 21000n,
+      maxFeePerGas: 20n,
+      maxPriorityFeePerGas: 2n,
+      nonce: 7,
+      to: '0x00000000000000000000000000000000000000b2',
+      type: 'eip1559',
+      value: 0n,
+    } satisfies TransactionSerializable;
+    const signedTransaction = await wrongSigner.signTransaction(transaction);
+    const parsedTransaction = parseTransaction(signedTransaction);
+    const signatureHex = signatureToHex({
+      r: parsedTransaction.r!,
+      s: parsedTransaction.s!,
+      yParity: parsedTransaction.yParity!,
+    });
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 1,
+        jsonrpc: '2.0',
+        result: signatureHex,
+      }),
+      status: 200,
+      statusText: 'OK',
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { createRemoteSignerAccount } = await import('../../src/utils/remoteSigner.ts');
+
+    const account = createRemoteSignerAccount({
+      address: configuredAddress,
+      url: 'https://signer.example',
+    });
+
+    await expect(account.signTransaction(transaction)).rejects.toThrow(
+      `Remote signer transaction signature recovered ${wrongSigner.address}, expected ${configuredAddress}`,
+    );
+  });
+});
+
+describe('remote signer startup verification', () => {
+  it('fails initClient when the remote signer message signature does not match the configured address', async () => {
+    vi.doMock('dotenv/config', () => ({}));
+    vi.doMock('../../src/utils/config.ts', () => ({ config: { chainId: 1 } }));
+    vi.doMock('../../src/utils/logger.ts', () => ({ log: { info: vi.fn(), warn: vi.fn() } }));
+
+    setClientTestEnv({
+      REMOTE_SIGNER_ADDRESS: '0x00000000000000000000000000000000000000A1',
+      REMOTE_SIGNER_URL: 'https://signer.example',
+    });
+
+    const wrongSigner = privateKeyToAccount(
+      '0x59c6995e998f97a5a0044966f094538c5f6d2e7d31be9c4754b150f8f7f7b1d8',
+    );
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: 1,
+        jsonrpc: '2.0',
+        result: await wrongSigner.signMessage({
+          message: '4626-ajna-vault-keeper remote signer identity check',
+        }),
+      }),
+      status: 200,
+      statusText: 'OK',
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { initClient } = await import('../../src/utils/client.ts');
+
+    await expect(initClient()).rejects.toThrow(
+      `Remote signer message signature recovered ${wrongSigner.address}, expected 0x00000000000000000000000000000000000000A1`,
+    );
   });
 });
