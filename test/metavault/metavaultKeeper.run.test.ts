@@ -270,4 +270,27 @@ describe('metavaultRun orchestration', () => {
     expect(reallocate).not.toHaveBeenCalled();
     expect(handleTransaction).not.toHaveBeenCalled();
   });
+
+  it('aborts the run when a drain in _executeMoveToBufferCalls fails', async () => {
+    const { metavaultRun, vaults, reallocate, handleTransaction } = await setupMetavaultRunTest({
+      balances: {
+        [BUFFER]: 400n * S,
+        [ARK_A]: 300n * S,
+        [ARK_B]: 300n * S,
+      },
+      bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+      evaluations: [],
+    });
+
+    handleTransaction.mockImplementation(async (_tx: unknown, ctx?: { action?: string }) => {
+      if (ctx?.action === 'drain') return { status: false };
+      return { status: true };
+    });
+
+    await metavaultRun();
+
+    expect(vaults[ARK_A]!.drain).toHaveBeenCalledOnce();
+    expect(vaults[ARK_A]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(reallocate).not.toHaveBeenCalled();
+  });
 });

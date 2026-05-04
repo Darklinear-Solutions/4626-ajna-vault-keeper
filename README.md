@@ -163,9 +163,11 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
 3. <a name="technical-overview-3-early-fail-or-skip-conditions"></a><a name="exit-conditions"></a>Early Fail or Skip Conditions:
 
     **Metavault keeper:**
-    * If any ARK is paused - the metavault keeper skips the entire run.
+    * If any ARK is paused, the metavault keeper skips the entire run.
+    * If a `drain` or `moveToBuffer` call fails while withdrawing from a decreasing ARK back into the buffer, the run is aborted before any `reallocate` call is issued.
     * If the planned reallocation would violate an ARK's allocation bounds, below min or above max, the run is aborted with an error.
     * If the total withdrawn does not equal the total supplied after computing allocations - the run is aborted due to an inconsistent reallocation invariant.
+    * If the `reallocate` call itself reverts, the run is aborted.
     * If no allocations need to change - the run exits cleanly with no state changes.
 
     **ARK keeper:**
@@ -177,6 +179,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     * If the optimal bucket is dusty (below the dust threshold in LP tokens) then the keeper skips to avoid operating on very small bucket amounts.
     * If the optimal bucket has been bankrupt more recently than the configured `minTimeSinceBankruptcy`, the run is aborted to prevent risky deposits.
     * If the optimal bucket's debt is locked due to an ongoing auction (i.e., withdrawals from the bucket would revert in Ajna with `RemoveDepositLockedByAuctionDebt()`), the run is aborted to prevent locking vault funds in the bucket.
+    * If a `drain` or `updateInterest` transaction fails at any point in the run, the run is aborted to keep the keeper from operating against a partially completed move.
 
 4. <a name="technical-overview-4-compute-targets"></a>Compute Targets:
 
