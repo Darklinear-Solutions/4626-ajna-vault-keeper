@@ -14,6 +14,7 @@ fs_permissions = [
 remappings = [
     "forge-std/=lib/forge-std/src/",
     "ajna-core/=lib/4626-ajna-vault/lib/ajna-core/src/",
+    "lib/4626-ajna-vault/:lib/ajna-core/=lib/4626-ajna-vault/lib/ajna-core/",
     "lib/4626-ajna-vault/:@openzeppelin/=lib/4626-ajna-vault/lib/ajna-core/lib/openzeppelin-contracts/",
     "lib/Aave-Vault/:@openzeppelin/=lib/Aave-Vault/lib/openzeppelin-contracts/contracts/",
     "@openzeppelin/contracts/=lib/4626-ajna-vault/lib/ajna-core/lib/openzeppelin-contracts/contracts/",
