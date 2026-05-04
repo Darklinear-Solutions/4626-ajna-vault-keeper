@@ -48,34 +48,43 @@ export async function arkRun(
   vault = createVault(address, vaultAuthAddress);
   _settings = settings;
 
-  if (isCurrentArkHalted()) return logRunExit('keeper halted');
-  if (await vault.isPaused()) return logRunExit('vault is currently paused');
-  if (await poolHasBadDebt(vault, _settings.maxAuctionAge)) return logRunExit('pool has bad debt');
+  try {
+    if (isCurrentArkHalted()) return _logRunExit('keeper halted');
+    if (await vault.isPaused()) return _logRunExit('vault is currently paused');
+    if (await poolHasBadDebt(vault, _settings.maxAuctionAge))
+      return _logRunExit('pool has bad debt');
 
-  const gas = await getGasWithBuffer('pool', 'updateInterest', [], await vault.getPoolAddress());
-  await handleTransaction(vault.updateInterest(gas), {
-    action: 'updateInterest',
-    ark: vault.getAddress(),
-  });
-  const data = await _getKeeperData();
-  await handleTransaction(vault.drain(data.optimalBucket), {
-    action: 'drain',
-    bucket: data.optimalBucket,
-    ark: vault.getAddress(),
-  });
+    const gas = await getGasWithBuffer('pool', 'updateInterest', [], await vault.getPoolAddress());
+    const vaultAddress = vault.getAddress();
+    const updateInterestTx = await handleTransaction(vault.updateInterest(gas), {
+      action: 'updateInterest',
+      ark: vaultAddress,
+    });
+    if (!updateInterestTx.status) _logRunExit(`updateInterest failed for ark ${vaultAddress}`);
 
-  if (!(await isOptimalBucketInRange(data)))
-    return logRunExit('optimal bucket is not in interest-earning range');
-  if (await isOptimalBucketDusty(data)) return logRunExit('optimal bucket is dusty');
-  if (await isOptimalBucketRecentlyBankrupt(data))
-    return logRunExit('optimal bucket was recently bankrupt');
-  if (await vault.isBucketDebtLocked(data.optimalBucket))
-    return logRunExit('optimal bucket debt is locked due to pending auction');
-  if (await optimalBucketHasCollateral(data)) return logRunExit('optimal bucket has collateral');
+    const data = await _getKeeperData();
+    const drainTx = await handleTransaction(vault.drain(data.optimalBucket), {
+      action: 'drain',
+      bucket: data.optimalBucket,
+      ark: vaultAddress,
+    });
+    if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
 
-  await rebalanceBuckets(data);
-  await rebalanceBuffer(data);
-  await logFinalState(data);
+    if (!(await isOptimalBucketInRange(data)))
+      return _logRunExit('optimal bucket is not in interest-earning range');
+    if (await isOptimalBucketDusty(data)) return _logRunExit('optimal bucket is dusty');
+    if (await isOptimalBucketRecentlyBankrupt(data))
+      return _logRunExit('optimal bucket was recently bankrupt');
+    if (await vault.isBucketDebtLocked(data.optimalBucket))
+      return _logRunExit('optimal bucket debt is locked due to pending auction');
+    if (await optimalBucketHasCollateral(data)) return _logRunExit('optimal bucket has collateral');
+
+    await rebalanceBuckets(data);
+    await rebalanceBuffer(data);
+    await logFinalState(data);
+  } catch (e) {
+    if (!(e instanceof RunAbortError)) throw e;
+  }
 }
 
 // ============= Core Rebalancing Functions =============
@@ -87,22 +96,22 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
     if (isCurrentArkHalted()) return;
 
     const bucket = data.buckets[i]!;
-    await handleTransaction(vault.drain(bucket), {
+    const vaultAddress = vault.getAddress();
+    const drainTx = await handleTransaction(vault.drain(bucket), {
       action: 'drain',
       bucket,
-      ark: vault.getAddress(),
+      ark: vaultAddress,
     });
+    if (!drainTx.status) _logRunExit(`drain failed for ark ${vaultAddress}`);
 
     const bucketValue = await vault.lpToValue(bucket);
     const amountToMove = await poolBalanceCap(bucketValue, vault);
     if (await shouldSkipBucket(bucket, amountToMove, data)) continue;
 
     const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data, i);
-    let results = [];
 
     for (const op of operations) {
       const txData = await executeMoveOperation(op);
-      results.push(txData);
 
       if (op.to === 'Buffer' && txData?.status) {
         bufferNeeded = await _calculateBufferDeficit(data);
@@ -225,22 +234,27 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
   if (isCurrentArkHalted()) return;
-  await handleTransaction(vault.drain(targetBucket), {
+  const vaultAddress = vault.getAddress();
+
+  const drainTx = await handleTransaction(vault.drain(targetBucket), {
     action: 'drain',
     bucket: targetBucket,
-    ark: vault.getAddress(),
+    ark: vaultAddress,
   });
+  if (!drainTx.status) _logRunExit(`drain failed for ark ${vaultAddress}`);
+
   const gas = await getGasWithBuffer(
     'vault',
     'moveFromBuffer',
     [targetBucket, amount],
-    vault.getAddress(),
+    vaultAddress,
   );
+
   await handleTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
     action: 'moveFromBuffer',
     to: targetBucket,
     amount: amount,
-    ark: vault.getAddress(),
+    ark: vaultAddress,
   });
 }
 
@@ -250,13 +264,16 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
 
   for (let i = 0; i < data.buckets.length && remaining > data.minAmount; i++) {
     if (isCurrentArkHalted()) return;
+    const vaultAddress = vault.getAddress();
 
     const bucket = data.buckets[i]!;
-    await handleTransaction(vault.drain(bucket), {
+    const drainTx = await handleTransaction(vault.drain(bucket), {
       action: 'drain',
       bucket,
-      ark: vault.getAddress(),
+      ark: vaultAddress,
     });
+    if (!drainTx.status) _logRunExit(`drain failed for ark ${vaultAddress}`);
+
     const bucketValue = await vault.lpToValue(bucket);
 
     if (bucketValue < data.minAmount) continue;
@@ -270,13 +287,13 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       'vault',
       'moveToBuffer',
       [bucket, amountToMove],
-      vault.getAddress(),
+      vaultAddress,
     );
     const txData = await handleTransaction(vault.moveToBuffer(bucket, amountToMove, gas), {
       action: 'moveToBuffer',
       from: bucket,
       amount: amountToMove,
-      ark: vault.getAddress(),
+      ark: vaultAddress,
     });
 
     if (txData?.status) remaining -= txData?.assets;
@@ -340,7 +357,7 @@ async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boo
 
 async function optimalBucketHasCollateral(data: KeeperRunData): Promise<boolean> {
   const bucketInfo = await vault.getBucketInfo(data.optimalBucket);
-  const collateral = bucketInfo[2];
+  const collateral = bucketInfo[1];
 
   return collateral > 0n;
 }
@@ -357,11 +374,14 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
   ]);
 
   for (let i = 0; i < initialBuckets.length; i++) {
-    await handleTransaction(vault.drain(initialBuckets[i]), {
+    const vaultAddress = vault.getAddress();
+    const drainTx = await handleTransaction(vault.drain(initialBuckets[i]), {
       action: 'drain',
       bucket: initialBuckets[i],
-      ark: vault.getAddress(),
+      ark: vaultAddress,
     });
+
+    if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
   }
 
   const [lupIndex, htpIndex, optimalBucket, buckets, bufferTarget] = await Promise.all([
@@ -478,11 +498,14 @@ function isCurrentArkHalted(): boolean {
 
 // ============= Logging =============
 
-function logRunExit(reason: string) {
+class RunAbortError extends Error {}
+
+function _logRunExit(reason: string): never {
   log.error(
     { event: 'ark_run_aborted', ark: vault.getAddress(), reason },
     `ark run aborted for ark ${vault.getAddress()}`,
   );
+  throw new RunAbortError(reason);
 }
 
 async function logFinalState(data: KeeperRunData): Promise<void> {

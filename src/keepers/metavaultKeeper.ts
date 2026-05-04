@@ -46,46 +46,53 @@ export type BufferAllocation = {
 // ============= Main Run Function =============
 
 export async function metavaultRun() {
-  const pausedArks = await _getPausedArks();
-  if (pausedArks.length > 0) {
-    return log.info(
-      { event: 'paused_arks_detected', arks: pausedArks },
-      'skipping run: one or more arks are paused',
-    );
+  try {
+    const pausedArks = await _getPausedArks();
+    if (pausedArks.length > 0) {
+      return log.info(
+        { event: 'paused_arks_detected', arks: pausedArks },
+        'skipping run: one or more arks are paused',
+      );
+    }
+
+    const strategyAddresses = [config.buffer.address, ...config.arks.map((ark) => ark.address)];
+    const totalAssets = (await getTotalExpectedSupplyAssets(strategyAddresses)) as bigint;
+    const arkAllocations = await _buildArkAllocations();
+    const bufferAllocation = await _buildBufferAllocation();
+
+    _rebalanceBuffer(arkAllocations, bufferAllocation, totalAssets);
+
+    const arks = _toArks(arkAllocations);
+    const evaluations = evaluateRates(arks);
+
+    if (_isRateReallocationRequired(evaluations)) {
+      _reallocateForRates(arkAllocations, evaluations, totalAssets);
+    }
+
+    await _executeMoveToBufferCalls(arkAllocations);
+
+    const validationError = _validateAllocations(arkAllocations, bufferAllocation, totalAssets);
+    if (validationError) return _logRunExit(validationError);
+
+    const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
+    if (typeof allocations === 'string') return _logRunExit(allocations);
+
+    if (allocations.length === 0) {
+      return log.info(
+        { event: 'no_metavault_reallocation_needed' },
+        'no metavault reallocation needed',
+      );
+    }
+
+    const reallocateTx = await handleTransaction(reallocate(allocations, config.defaultGas), {
+      action: 'reallocate',
+    });
+    if (!reallocateTx.status) return _logRunExit('reallocate failed');
+
+    log.info({ event: 'metavault_run_complete', allocations }, 'metavault run complete');
+  } catch (e) {
+    if (!(e instanceof RunAbortError)) throw e;
   }
-
-  const strategyAddresses = [config.buffer.address, ...config.arks.map((ark) => ark.address)];
-  const totalAssets = (await getTotalExpectedSupplyAssets(strategyAddresses)) as bigint;
-  const arkAllocations = await _buildArkAllocations();
-  const bufferAllocation = await _buildBufferAllocation();
-
-  _rebalanceBuffer(arkAllocations, bufferAllocation, totalAssets);
-
-  const arks = _toArks(arkAllocations);
-  const evaluations = evaluateRates(arks);
-
-  if (_isRateReallocationRequired(evaluations)) {
-    _reallocateForRates(arkAllocations, evaluations, totalAssets);
-  }
-
-  await _executeMoveToBufferCalls(arkAllocations);
-
-  const validationError = _validateAllocations(arkAllocations, bufferAllocation, totalAssets);
-  if (validationError) return _logRunExit(validationError);
-
-  const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
-  if (typeof allocations === 'string') return _logRunExit(allocations);
-
-  if (allocations.length === 0) {
-    return log.info(
-      { event: 'no_metavault_reallocation_needed' },
-      'no metavault reallocation needed',
-    );
-  }
-
-  await handleTransaction(reallocate(allocations, config.defaultGas), { action: 'reallocate' });
-
-  log.info({ event: 'metavault_run_complete', allocations }, 'metavault run complete');
 }
 
 // ============= Initialization =============
@@ -276,18 +283,22 @@ async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
 
     for (const { bucket, amount } of bucketPlan) {
       const vaultAddress = ark.vaultAddress ?? ark.vault.getAddress();
-      await handleTransaction(ark.vault.drain(bucket), {
+      const drainTx = await handleTransaction(ark.vault.drain(bucket), {
         action: 'drain',
         bucket,
         ark: vaultAddress,
       });
+      if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
+
       const gas = await getGasWithBuffer('vault', 'moveToBuffer', [bucket, amount], ark.id);
-      await handleTransaction(ark.vault.moveToBuffer(bucket, amount, gas), {
+      const moveTx = await handleTransaction(ark.vault.moveToBuffer(bucket, amount, gas), {
         action: 'moveToBuffer',
         from: bucket,
         amount,
         ark: vaultAddress,
       });
+
+      if (!moveTx.status) _logRunExit(`moveToBuffer failed for ark ${vaultAddress}`);
     }
   }
 }
@@ -370,8 +381,11 @@ export function _buildFinalAllocations(
 
 // ============= Helpers =============
 
-function _logRunExit(reason: string) {
+class RunAbortError extends Error {}
+
+function _logRunExit(reason: string): never {
   log.error({ event: 'metavault_run_aborted', reason }, `metavault run aborted: ${reason}`);
+  throw new RunAbortError(reason);
 }
 
 function _toArks(allocations: ArkAllocation[]): Ark[] {
