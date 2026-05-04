@@ -376,11 +376,14 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
   ]);
 
   for (let i = 0; i < initialBuckets.length; i++) {
-    await handleTransaction(vault.drain(initialBuckets[i]), {
+    const vaultAddress = vault.getAddress();
+    const drainTx = await handleTransaction(vault.drain(initialBuckets[i]), {
       action: 'drain',
       bucket: initialBuckets[i],
-      ark: vault.getAddress(),
+      ark: vaultAddress,
     });
+
+    if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
   }
 
   const [lupIndex, htpIndex, optimalBucket, buckets, bufferTarget] = await Promise.all([
