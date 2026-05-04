@@ -109,11 +109,9 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
     if (await shouldSkipBucket(bucket, amountToMove, data)) continue;
 
     const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data, i);
-    let results = [];
 
     for (const op of operations) {
       const txData = await executeMoveOperation(op);
-      results.push(txData);
 
       if (op.to === 'Buffer' && txData?.status) {
         bufferNeeded = await _calculateBufferDeficit(data);
