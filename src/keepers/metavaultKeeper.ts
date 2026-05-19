@@ -74,22 +74,25 @@ export async function metavaultRun() {
       _reallocateForRates(arkAllocations, evaluations, totalAssets);
     }
 
-    await _executeMoveToBufferCalls(arkAllocations);
-
     const validationError = _validateAllocations(arkAllocations, bufferAllocation, totalAssets);
     if (validationError) return _logRunExit(validationError);
 
-    await _refreshRealInitialAssets(arkAllocations, bufferAllocation);
+    const preview = _buildFinalAllocations(arkAllocations, bufferAllocation);
+    if (typeof preview === 'string') return _logRunExit(preview);
 
-    const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
-    if (typeof allocations === 'string') return _logRunExit(allocations);
-
-    if (allocations.length === 0) {
+    if (preview.length === 0) {
       return log.info(
         { event: 'no_metavault_reallocation_needed' },
         'no metavault reallocation needed',
       );
     }
+
+    await _executeMoveToBufferCalls(arkAllocations);
+
+    await _refreshRealInitialAssets(arkAllocations, bufferAllocation);
+
+    const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
+    if (typeof allocations === 'string') return _logRunExit(allocations);
 
     const reallocateTx = await handleTransaction(reallocate(allocations, config.defaultGas), {
       action: 'reallocate',

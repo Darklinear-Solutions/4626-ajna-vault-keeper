@@ -499,4 +499,65 @@ describe('metavaultRun orchestration', () => {
     expect(handleTransaction).not.toHaveBeenCalled();
     expect(reallocate).not.toHaveBeenCalled();
   });
+
+  // Regression: _validateAllocations and the consistency portion of _buildFinalAllocations must
+  // run before _executeMoveToBufferCalls. Otherwise an invalid plan can fire drain/moveToBuffer
+  // and strand assets in the ARK buffer before the keeper discovers it cannot submit a valid
+  // reallocate() — leaving operator state inconsistent with onchain state and producing the
+  // scheduler-undo path described in DIFFERENTIAL_REVIEW_REPORT issue #3.
+  //
+  // Scenario: BUFFER far below target with both ARKs near their minimums. _rebalanceBuffer drains
+  // both ARKs to zero in the below-min pass, but the buffer deficit (~150*S) is larger than the
+  // arks' combined available capital, so the run lands with ARK_A and ARK_B below their 5% min
+  // *and* BUFFER below its 40% target. That trips _validateAllocations' "below min" branch
+  // (which gates on !bufferAtTarget). bucketPlan is set wide enough that, without the ordering
+  // guarantee, _executeMoveToBufferCalls would happily run drain+moveToBuffer for ARK_A.
+  it('skips pre-moves when _validateAllocations rejects the plan before any drain or moveToBuffer fires', async () => {
+    const { metavaultRun, vaults, selectBuckets, handleTransaction, reallocate } =
+      await setupMetavaultRunTest({
+        balances: {
+          [BUFFER]: 100n * S,
+          [ARK_A]: 100n * S,
+          [ARK_B]: 50n * S,
+        },
+        bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+        evaluations: [],
+      });
+
+    await metavaultRun();
+
+    expect(selectBuckets).not.toHaveBeenCalled();
+    expect(vaults[ARK_A]!.drain).not.toHaveBeenCalled();
+    expect(vaults[ARK_A]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(vaults[ARK_B]!.drain).not.toHaveBeenCalled();
+    expect(vaults[ARK_B]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(handleTransaction).not.toHaveBeenCalled();
+    expect(reallocate).not.toHaveBeenCalled();
+  });
+
+  // Regression: _refreshRealInitialAssets is only meaningful when it can update the targets that
+  // reallocate() will submit. With validation and the consistency preview moved before
+  // _executeMoveToBufferCalls, the no-op short-circuit (preview.length === 0) must skip the
+  // refresh entirely — there is nothing to refresh for, and an extra RPC pass is wasted work that
+  // could mask bugs in the snapshot read pattern.
+  it('does not refresh balances when no allocation deltas exist', async () => {
+    const { metavaultRun, getExpectedSupplyAssets } = await setupMetavaultRunTest({
+      balances: {
+        [BUFFER]: 400n * S,
+        [ARK_A]: 150n * S,
+        [ARK_B]: 450n * S,
+      },
+      evaluations: [],
+    });
+
+    await metavaultRun();
+
+    // Each of BUFFER, ARK_A, ARK_B is read exactly once during _buildArkAllocations /
+    // _buildBufferAllocation. The refresh (a second read for each) must not fire.
+    const callsPer = (addr: Address) =>
+      getExpectedSupplyAssets.mock.calls.filter(([a]) => a === addr).length;
+    expect(callsPer(BUFFER)).toBe(1);
+    expect(callsPer(ARK_A)).toBe(1);
+    expect(callsPer(ARK_B)).toBe(1);
+  });
 });
