@@ -11,8 +11,10 @@ import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
 import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
 import { log } from '../utils/logger.ts';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
-import { selectBuckets } from '../ark/utils/selectBuckets.ts';
+import { selectBuckets, type BucketMove } from '../ark/utils/selectBuckets.ts';
 import { type Address, maxUint256 } from 'viem';
+
+export const ACCRUAL_PAD_BPS = 5n;
 
 // ============= Types =============
 
@@ -28,6 +30,7 @@ export type ArkAllocation = {
   vaultAddress?: Address;
   assets: bigint;
   initialAssets: bigint;
+  realInitialAssets: bigint;
   vault: ReturnType<typeof createVault>;
   min: number;
   max: number;
@@ -40,6 +43,7 @@ export type BufferAllocation = {
   id: Address;
   assets: bigint;
   initialAssets: bigint;
+  realInitialAssets: bigint;
   allocation: number;
 };
 
@@ -73,6 +77,8 @@ export async function metavaultRun() {
 
     const validationError = _validateAllocations(arkAllocations, bufferAllocation, totalAssets);
     if (validationError) return _logRunExit(validationError);
+
+    await _refreshRealInitialAssets(arkAllocations, bufferAllocation);
 
     const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
     if (typeof allocations === 'string') return _logRunExit(allocations);
@@ -115,6 +121,7 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
       vaultAddress: arkConfig.vaultAddress,
       assets: cappedBalance,
       initialAssets: cappedBalance,
+      realInitialAssets: balance,
       vault,
       min: arkConfig.allocation.min,
       max: arkConfig.allocation.max,
@@ -134,6 +141,7 @@ async function _buildBufferAllocation(): Promise<BufferAllocation> {
     id: config.buffer.address,
     assets: balance,
     initialAssets: balance,
+    realInitialAssets: balance,
     allocation: config.buffer.allocation,
   };
 }
@@ -275,14 +283,27 @@ export function _reallocateForRates(
 // ============= MoveToBuffer Execution =============
 
 async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
+  const plans: Array<{ ark: ArkAllocation; vaultAddress: Address; plan: BucketMove[] }> = [];
+
   for (const ark of arks) {
     if (ark.assets >= ark.initialAssets) continue;
 
+    const vaultAddress = ark.vaultAddress ?? ark.vault.getAddress();
     const amountToMove = ark.initialAssets - ark.assets;
     const bucketPlan = await selectBuckets(ark.vault, amountToMove);
 
-    for (const { bucket, amount } of bucketPlan) {
-      const vaultAddress = ark.vaultAddress ?? ark.vault.getAddress();
+    const plannedCoverage = bucketPlan.reduce((sum, p) => sum + p.amount, 0n);
+    if (plannedCoverage < amountToMove) {
+      return _logRunExit(
+        `bucket plan for ark ${vaultAddress} covers ${plannedCoverage} of planned decrease ${amountToMove}`,
+      );
+    }
+
+    plans.push({ ark, vaultAddress, plan: bucketPlan });
+  }
+
+  for (const { ark, vaultAddress, plan } of plans) {
+    for (const { bucket, amount } of plan) {
       const drainTx = await handleTransaction(ark.vault.drain(bucket), {
         action: 'drain',
         bucket,
@@ -298,9 +319,24 @@ async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
         ark: vaultAddress,
       });
 
-      if (!moveTx.status) _logRunExit(`moveToBuffer failed for ark ${vaultAddress}`);
+      if (!moveTx.status) return _logRunExit(`moveToBuffer failed for ark ${vaultAddress}`);
     }
   }
+}
+
+async function _refreshRealInitialAssets(
+  arks: ArkAllocation[],
+  buffer: BufferAllocation,
+): Promise<void> {
+  const balances = (await Promise.all([
+    ...arks.map((ark) => getExpectedSupplyAssets(ark.id)),
+    getExpectedSupplyAssets(buffer.id),
+  ])) as bigint[];
+
+  arks.forEach((ark, i) => {
+    ark.realInitialAssets = balances[i]!;
+  });
+  buffer.realInitialAssets = balances[balances.length - 1]!;
 }
 
 // ============= Validation =============
@@ -351,25 +387,50 @@ export function _buildFinalAllocations(
   arks: ArkAllocation[],
   buffer: BufferAllocation,
 ): MarketAllocation[] | string {
-  const all: { id: Address; assets: bigint; initialAssets: bigint }[] = [
-    ...arks.map((a) => ({ id: a.id, assets: a.assets, initialAssets: a.initialAssets })),
-    { id: buffer.id, assets: buffer.assets, initialAssets: buffer.initialAssets },
+  const all = [
+    ...arks.map((a) => ({
+      id: a.id,
+      delta: a.assets - a.initialAssets,
+      realInitialAssets: a.realInitialAssets,
+    })),
+    {
+      id: buffer.id,
+      delta: buffer.assets - buffer.initialAssets,
+      realInitialAssets: buffer.realInitialAssets,
+    },
   ];
 
-  const decreasing = all.filter((a) => a.assets < a.initialAssets);
-  const increasing = all.filter((a) => a.assets > a.initialAssets);
+  for (const a of all) {
+    if (a.delta < 0n && a.realInitialAssets < -a.delta) {
+      return `refreshed real balance for ${a.id} (${a.realInitialAssets}) is below planned decrease (${-a.delta})`;
+    }
+  }
+
+  const withTargets = all.map((a) => {
+    const base = a.realInitialAssets + a.delta;
+    let pad = 0n;
+    if (a.delta < 0n) {
+      const bpsPad = (a.realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
+      const decrease = -a.delta;
+      pad = bpsPad < decrease ? bpsPad : decrease;
+    }
+    return { id: a.id, delta: a.delta, finalTarget: base + pad };
+  });
+
+  const decreasing = withTargets.filter((a) => a.delta < 0n);
+  const increasing = withTargets.filter((a) => a.delta > 0n);
 
   if (decreasing.length === 0 && increasing.length === 0) return [];
 
-  const totalWithdrawn = decreasing.reduce((sum, a) => sum + (a.initialAssets - a.assets), 0n);
-  const totalSupplied = increasing.reduce((sum, a) => sum + (a.assets - a.initialAssets), 0n);
+  const totalWithdrawn = decreasing.reduce((sum, a) => sum + -a.delta, 0n);
+  const totalSupplied = increasing.reduce((sum, a) => sum + a.delta, 0n);
   if (totalWithdrawn !== totalSupplied) {
     return `inconsistent reallocation: totalWithdrawn (${totalWithdrawn}) != totalSupplied (${totalSupplied})`;
   }
 
   const ordered: MarketAllocation[] = [
-    ...decreasing.map((a) => ({ id: a.id, assets: a.assets })),
-    ...increasing.slice(0, -1).map((a) => ({ id: a.id, assets: a.assets })),
+    ...decreasing.map((a) => ({ id: a.id, assets: a.finalTarget })),
+    ...increasing.slice(0, -1).map((a) => ({ id: a.id, assets: a.finalTarget })),
   ];
 
   if (increasing.length > 0) {

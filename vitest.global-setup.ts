@@ -126,6 +126,12 @@ async function deployContracts(): Promise<void> {
       testConfig.arks[0].address = addresses.ARK_1_ADDRESS;
       testConfig.arks[1].address = addresses.ARK_2_ADDRESS;
       testConfig.arks[2].address = addresses.ARK_3_ADDRESS;
+      testConfig.arks[0].vaultAddress = addresses.ARK_1_ADDRESS;
+      testConfig.arks[1].vaultAddress = addresses.ARK_2_ADDRESS;
+      testConfig.arks[2].vaultAddress = addresses.ARK_3_ADDRESS;
+      testConfig.arks[0].vaultAuthAddress = addresses.ARK_AUTH_1_ADDRESS;
+      testConfig.arks[1].vaultAuthAddress = addresses.ARK_AUTH_2_ADDRESS;
+      testConfig.arks[2].vaultAuthAddress = addresses.ARK_AUTH_3_ADDRESS;
       testConfig.buffer.address = addresses.AAVE_VAULT_ADDRESS;
       fs.writeFileSync(
         path.join(process.cwd(), 'config.json'),

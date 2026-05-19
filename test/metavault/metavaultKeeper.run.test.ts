@@ -1,5 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { maxUint256, type Address } from 'viem';
+import { ACCRUAL_PAD_BPS } from '../../src/keepers/metavaultKeeper';
+
+// Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: never exceeds the planned
+// decrease, otherwise the submitted target would invert into a supply branch at Euler.
+//
+// ACCRUAL_PAD_BPS (5 bps) was chosen to cover interest accrual between the keeper's pre-reallocate
+// refresh read and the reallocate transaction mining. In the unclamped regime (|delta| ≥
+// realInitialAssets * 5/10000), the pad gives >10x headroom against accrual at 50% APR over 2
+// blocks (12s each). In the clamped regime (|delta| < that threshold), the pad collapses to
+// |delta| and any remaining accrual headroom is sacrificed to keep the target ≤ realInitialAssets
+// — accepted as the safer trade-off than risking a supply-branch inversion at Euler.
+const accrualPad = (realInitialAssets: bigint, decrease: bigint) => {
+  const bps = (realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
+  return bps < decrease ? bps : decrease;
+};
 
 const BUFFER = '0x00000000000000000000000000000000000000ff' as Address;
 const ARK_A = '0x00000000000000000000000000000000000000a1' as Address;
@@ -62,6 +77,7 @@ async function setupMetavaultRunTest({
   evaluations = [],
   bucketPlan = [],
   poolBalanceCaps = {},
+  accrued = {},
 }: {
   arkConfigs?: ArkConfig[];
   balances?: Partial<Record<Address, bigint>>;
@@ -70,6 +86,7 @@ async function setupMetavaultRunTest({
   evaluations?: Array<{ address: Address; targets: Address[] }>;
   bucketPlan?: Array<{ bucket: bigint; amount: bigint }>;
   poolBalanceCaps?: Partial<Record<Address, bigint>>;
+  accrued?: Partial<Record<Address, bigint>>;
 } = {}) {
   const vaultFixtures = {
     [ARK_A]: buildVaultFixture(ARK_A, { rate: 100n }),
@@ -84,7 +101,13 @@ async function setupMetavaultRunTest({
     ...balances,
   } as Record<Address, bigint>;
 
-  const getExpectedSupplyAssets = vi.fn(async (address: Address) => balanceMap[address] ?? 0n);
+  const callCounts: Record<Address, number> = {};
+  const getExpectedSupplyAssets = vi.fn(async (address: Address) => {
+    callCounts[address] = (callCounts[address] ?? 0) + 1;
+    const base = balanceMap[address] ?? 0n;
+    const accrual = accrued[address];
+    return callCounts[address]! > 1 && accrual !== undefined ? base + accrual : base;
+  });
   const getTotalExpectedSupplyAssets = vi.fn().mockResolvedValue(totalAssets);
   const reallocate = vi.fn().mockReturnValue({ kind: 'reallocate' });
   const evaluateRates = vi.fn().mockReturnValue(evaluations);
@@ -161,6 +184,7 @@ async function setupMetavaultRunTest({
   return {
     metavaultRun,
     vaults: vaultFixtures,
+    getExpectedSupplyAssets,
     getTotalExpectedSupplyAssets,
     reallocate,
     selectBuckets,
@@ -245,7 +269,7 @@ describe('metavaultRun orchestration', () => {
     expect(reallocate).toHaveBeenCalledOnce();
     expect(reallocate).toHaveBeenCalledWith(
       [
-        { id: ARK_A, assets: 200n * S },
+        { id: ARK_A, assets: 200n * S + accrualPad(300n * S, 100n * S) },
         { id: ARK_B, assets: maxUint256 },
       ],
       3_000_000n,
@@ -291,6 +315,141 @@ describe('metavaultRun orchestration', () => {
 
     expect(vaults[ARK_A]!.drain).toHaveBeenCalledOnce();
     expect(vaults[ARK_A]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(reallocate).not.toHaveBeenCalled();
+  });
+
+  // Regression: a pool-capped ARK can have a real Euler supply much larger than the planner's
+  // working balance. The submitted reallocate() target must be derived from the real supply, not
+  // the cap, otherwise Euler tries to withdraw the entire illiquid portion.
+  it('uses real Euler supply (not pool-capped balance) when building decreasing reallocate targets', async () => {
+    const { metavaultRun, vaults, selectBuckets, reallocate } = await setupMetavaultRunTest({
+      arkConfigs: [{ address: ARK_A, allocation: { min: 5, max: 60 } }],
+      balances: {
+        [BUFFER]: 500n * S,
+        [ARK_A]: 1000n * S,
+      },
+      totalAssets: 1500n * S,
+      poolBalanceCaps: {
+        [ARK_A]: 200n * S,
+      },
+      bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+      evaluations: [],
+    });
+
+    await metavaultRun();
+
+    expect(selectBuckets).toHaveBeenCalledWith(vaults[ARK_A]!, 100n * S);
+    expect(vaults[ARK_A]!.drain).toHaveBeenCalledOnce();
+    expect(vaults[ARK_A]!.moveToBuffer).toHaveBeenCalledOnce();
+    expect(reallocate).toHaveBeenCalledOnce();
+    expect(reallocate).toHaveBeenCalledWith(
+      [
+        // realInitialAssets (1000) − plannedDecrease (100) + clamped accrualPad(1000, 100)
+        { id: ARK_A, assets: 900n * S + accrualPad(1000n * S, 100n * S) },
+        { id: BUFFER, assets: maxUint256 },
+      ],
+      3_000_000n,
+    );
+  });
+
+  // Regression: interest can accrue between the keeper snapshot and reallocate(), and `drain`
+  // explicitly claims pending interest. The refresh before reallocate keeps the submitted target
+  // anchored to the current real balance so the withdrawal equals what was prepared.
+  it('refreshes real Euler supply before reallocate so accrued interest does not underfund withdrawal', async () => {
+    const { metavaultRun, reallocate, getExpectedSupplyAssets } = await setupMetavaultRunTest({
+      balances: {
+        [BUFFER]: 400n * S,
+        [ARK_A]: 300n * S,
+        [ARK_B]: 300n * S,
+      },
+      accrued: {
+        [ARK_A]: 5n * S, // ARK_A real grows by 5*S between snapshot and refresh
+      },
+      bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+      evaluations: [],
+    });
+
+    await metavaultRun();
+
+    // ARK_A is read twice: once during _buildArkAllocations, again during _refreshRealInitialAssets.
+    const arkACalls = getExpectedSupplyAssets.mock.calls.filter(([addr]) => addr === ARK_A).length;
+    expect(arkACalls).toBe(2);
+
+    expect(reallocate).toHaveBeenCalledOnce();
+    expect(reallocate).toHaveBeenCalledWith(
+      [
+        // refreshed real (305) − plannedDecrease (100) + clamped accrualPad(305, 100)
+        { id: ARK_A, assets: 205n * S + accrualPad(305n * S, 100n * S) },
+        { id: ARK_B, assets: maxUint256 },
+      ],
+      3_000_000n,
+    );
+  });
+
+  // Regression: selectBuckets() may return a partial plan (e.g. no bucket is large enough, dust
+  // skips reduce coverage). The keeper must abort before issuing any drain or moveToBuffer so the
+  // ARK's internal buffer is never partially funded and reallocate() never sees a short ARK.
+  it('aborts before any pre-move when the bucket plan does not cover the planned decrease', async () => {
+    const { metavaultRun, vaults, selectBuckets, handleTransaction, reallocate } =
+      await setupMetavaultRunTest({
+        balances: {
+          [BUFFER]: 400n * S,
+          [ARK_A]: 300n * S,
+          [ARK_B]: 300n * S,
+        },
+        bucketPlan: [{ bucket: 4150n, amount: 30n * S }], // only 30*S vs planned 100*S
+        evaluations: [],
+      });
+
+    await metavaultRun();
+
+    expect(selectBuckets).toHaveBeenCalledOnce();
+    expect(vaults[ARK_A]!.drain).not.toHaveBeenCalled();
+    expect(vaults[ARK_A]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(handleTransaction).not.toHaveBeenCalled();
+    expect(reallocate).not.toHaveBeenCalled();
+  });
+
+  // Regression: _executeMoveToBufferCalls validates all decreasing ARKs' bucket plans in pass 1
+  // before any drain/moveToBuffer fires in pass 2. A future refactor that interleaves
+  // drain+moveToBuffer with the per-ARK coverage check would let an earlier ARK fully execute its
+  // pre-moves and then strand them when a later ARK's plan is short — exactly the multi-ARK
+  // partial-pre-move issue this refactor closes.
+  it('aborts both ARKs even when only the second has insufficient bucket coverage', async () => {
+    const { metavaultRun, vaults, selectBuckets, handleTransaction, reallocate } =
+      await setupMetavaultRunTest({
+        arkConfigs: [
+          { address: ARK_A, allocation: { min: 5, max: 20 } },
+          { address: ARK_B, allocation: { min: 5, max: 60 } },
+        ],
+        balances: {
+          [BUFFER]: 100n * S,
+          [ARK_A]: 300n * S,
+          [ARK_B]: 700n * S,
+        },
+        totalAssets: 1100n * S,
+        evaluations: [],
+      });
+
+    // ARK_A's plan fully covers its 245*S planned decrease; ARK_B's plan only covers 30*S of its
+    // 95*S planned decrease. Validate-all-then-execute must abort before ARK_A's drain fires.
+    selectBuckets.mockImplementation(
+      async (vault: { getAddress: () => Address }, amount: bigint) => {
+        if (vault.getAddress() === ARK_A) return [{ bucket: 4150n, amount }];
+        return [{ bucket: 4151n, amount: 30n * S }];
+      },
+    );
+
+    await metavaultRun();
+
+    // Pass 1 must reach both ARKs.
+    expect(selectBuckets).toHaveBeenCalledTimes(2);
+    // Pass 2 (state changes) must never run for either ARK.
+    expect(vaults[ARK_A]!.drain).not.toHaveBeenCalled();
+    expect(vaults[ARK_A]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(vaults[ARK_B]!.drain).not.toHaveBeenCalled();
+    expect(vaults[ARK_B]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(handleTransaction).not.toHaveBeenCalled();
     expect(reallocate).not.toHaveBeenCalled();
   });
 });

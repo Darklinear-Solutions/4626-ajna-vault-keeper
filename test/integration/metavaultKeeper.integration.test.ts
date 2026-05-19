@@ -1,14 +1,23 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
-import { metavaultRun } from '../../src/keepers/metavaultKeeper';
+import { metavaultRun, ACCRUAL_PAD_BPS } from '../../src/keepers/metavaultKeeper';
+import { arkRun } from '../../src/keepers/arkKeeper';
 import {
   getExpectedSupplyAssets,
   getTotalExpectedSupplyAssets,
 } from '../../src/metavault/metavault';
-import { config } from '../../src/utils/config';
+import { config, resolveArkSettings } from '../../src/utils/config';
 import { client } from '../../src/utils/client';
 import { contract } from '../../src/utils/contract';
 import { type Address } from 'viem';
+
+// Tolerance large enough to absorb the accrual pad's slack across all configured strategies
+// (decreasing targets ask Euler to withdraw slightly less than what was prepared, so the buffer
+// ends up below its nominal target by up to pad * num_strategies).
+const padAwareTolerance = (totalAssets: bigint): bigint => {
+  const strategies = BigInt(config.arks.length + 1);
+  return (totalAssets * ACCRUAL_PAD_BPS * strategies * 3n) / 10000n + 1n;
+};
 
 vi.mock('../../src/subgraph/poolHealth.ts', () => ({
   poolHasBadDebt: vi.fn().mockResolvedValue(false),
@@ -86,7 +95,7 @@ describe('metavault keeper run', () => {
     await metavaultRun();
     const afterSecondRun = await getBalances();
 
-    const tolerance = afterFirstRun.totalAssets / 1_000_000n || 1n;
+    const tolerance = padAwareTolerance(afterFirstRun.totalAssets);
 
     const bufferDiff =
       afterSecondRun.bufferBalance > afterFirstRun.bufferBalance
@@ -187,7 +196,7 @@ describe('metavault keeper run', () => {
     await metavaultRun();
     const afterSecondRun = await getBalances();
 
-    const tolerance = afterSecondRun.totalAssets / 1_000_000n || 1n;
+    const tolerance = padAwareTolerance(afterSecondRun.totalAssets);
 
     // Buffer should be back near its target
     const bufferTarget = (afterSecondRun.totalAssets * BigInt(config.buffer.allocation)) / 100n;
@@ -224,6 +233,12 @@ describe('metavault keeper run', () => {
   it('rebalances after a withdrawal reduces total assets', async () => {
     // First run distributes funds to arks
     await metavaultRun();
+    // Mirror scheduler.ts: ark keepers move freshly-deposited buffer funds into buckets, so the
+    // next metavault run sees per-ark bucket liquidity (the operational invariant the strict
+    // bucket-coverage check relies on).
+    for (const ark of config.arks) {
+      await arkRun(ark.vaultAddress, ark.vaultAuthAddress, resolveArkSettings(ark));
+    }
     const afterFirstRun = await getBalances();
 
     // Withdraw from the metavault to reduce total assets, making arks overweight
@@ -242,7 +257,7 @@ describe('metavault keeper run', () => {
     await metavaultRun();
     const afterSecondRun = await getBalances();
 
-    const tolerance = afterSecondRun.totalAssets / 1_000_000n || 1n;
+    const tolerance = padAwareTolerance(afterSecondRun.totalAssets);
 
     // Buffer should be near target for the new total
     const bufferTarget = (afterSecondRun.totalAssets * BigInt(config.buffer.allocation)) / 100n;

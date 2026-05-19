@@ -12,3 +12,5 @@ out/
 config.json
 /keystore/
 .claude/settings.local.json
+DIFFERENTIAL_REVIEW_REPORT.md
+CLAUDE.md
