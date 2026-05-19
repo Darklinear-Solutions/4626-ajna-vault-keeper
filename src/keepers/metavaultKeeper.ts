@@ -12,6 +12,7 @@ import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
 import { log } from '../utils/logger.ts';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
 import { selectBuckets, type BucketMove } from '../ark/utils/selectBuckets.ts';
+import { toWad } from '../utils/decimalConversion.ts';
 import { type Address, maxUint256 } from 'viem';
 
 export const ACCRUAL_PAD_BPS = 5n;
@@ -289,13 +290,14 @@ async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
     if (ark.assets >= ark.initialAssets) continue;
 
     const vaultAddress = ark.vaultAddress ?? ark.vault.getAddress();
-    const amountToMove = ark.initialAssets - ark.assets;
-    const bucketPlan = await selectBuckets(ark.vault, amountToMove);
+    const assetDecimals = (await ark.vault.getAssetDecimals()) as number;
+    const amountToMoveWad = toWad(ark.initialAssets - ark.assets, assetDecimals);
+    const bucketPlan = await selectBuckets(ark.vault, amountToMoveWad);
 
     const plannedCoverage = bucketPlan.reduce((sum, p) => sum + p.amount, 0n);
-    if (plannedCoverage < amountToMove) {
+    if (plannedCoverage < amountToMoveWad) {
       return _logRunExit(
-        `bucket plan for ark ${vaultAddress} covers ${plannedCoverage} of planned decrease ${amountToMove}`,
+        `bucket plan for ark ${vaultAddress} covers ${plannedCoverage} of planned decrease ${amountToMoveWad}`,
       );
     }
 

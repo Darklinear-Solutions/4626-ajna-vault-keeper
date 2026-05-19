@@ -30,12 +30,17 @@ type ArkConfig = {
 
 function buildVaultFixture(
   address: Address,
-  { paused = false, rate = 100n }: { paused?: boolean; rate?: bigint } = {},
+  {
+    paused = false,
+    rate = 100n,
+    assetDecimals = 18,
+  }: { paused?: boolean; rate?: bigint; assetDecimals?: number } = {},
 ) {
   return {
     getAddress: () => address,
     isPaused: vi.fn().mockResolvedValue(paused),
     getBorrowFeeRate: vi.fn().mockResolvedValue(rate),
+    getAssetDecimals: vi.fn().mockResolvedValue(assetDecimals),
     drain: vi.fn().mockResolvedValue(TX_HASH),
     moveToBuffer: vi.fn().mockResolvedValue(TX_HASH),
   };
@@ -408,6 +413,48 @@ describe('metavaultRun orchestration', () => {
     expect(vaults[ARK_A]!.moveToBuffer).not.toHaveBeenCalled();
     expect(handleTransaction).not.toHaveBeenCalled();
     expect(reallocate).not.toHaveBeenCalled();
+  });
+
+  // Regression: amountToMove from previewRedeem is in asset decimals, but selectBuckets compares
+  // against lpToValue() (WAD) and moveToBuffer's contract function expects _wad. For a 6-decimal
+  // quote token (e.g. USDC), the keeper must convert at the boundary or it under-counts every
+  // move by 10^12 and effectively no-ops.
+  it('converts amountToMove to WAD when the ARK quote token is not 18 decimals', async () => {
+    const SIX_DEC = 10n ** 6n; // 1 token in asset decimals
+    const WAD = 10n ** 18n;
+    const arkA = buildVaultFixture(ARK_A, { rate: 100n, assetDecimals: 6 });
+    const arkB = buildVaultFixture(ARK_B, { rate: 200n, assetDecimals: 6 });
+
+    const { metavaultRun, selectBuckets, reallocate } = await setupMetavaultRunTest({
+      balances: {
+        [BUFFER]: 400n * SIX_DEC,
+        [ARK_A]: 300n * SIX_DEC,
+        [ARK_B]: 300n * SIX_DEC,
+      },
+      totalAssets: 1000n * SIX_DEC,
+      // selectBuckets is mocked to return whatever the test provides; the production
+      // implementation returns lpToValue() amounts which are WAD.
+      bucketPlan: [{ bucket: 4150n, amount: 100n * WAD }],
+      evaluations: [],
+      vaults: { [ARK_A]: arkA, [ARK_B]: arkB },
+    });
+
+    await metavaultRun();
+
+    // ARK_A's planned decrease is 100 tokens = 100*1e6 in asset decimals → 100*1e18 in WAD.
+    expect(selectBuckets).toHaveBeenCalledWith(arkA, 100n * WAD);
+    expect(arkA.moveToBuffer).toHaveBeenCalledWith(4150n, 100n * WAD, 77n);
+    expect(reallocate).toHaveBeenCalledOnce();
+    // Reallocate targets are still asset-denominated (Euler reads previewRedeem in asset
+    // decimals). realInitialAssets (300*1e6) − planned decrease (100*1e6) + clamped pad
+    // (min(300*1e6 * 5/10000, 100*1e6) = 150_000) = 200_150_000.
+    expect(reallocate).toHaveBeenCalledWith(
+      [
+        { id: ARK_A, assets: 200_150_000n },
+        { id: ARK_B, assets: maxUint256 },
+      ],
+      3_000_000n,
+    );
   });
 
   // Regression: _executeMoveToBufferCalls validates all decreasing ARKs' bucket plans in pass 1
