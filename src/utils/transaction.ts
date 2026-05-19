@@ -25,6 +25,15 @@ type TransactionContext = Record<string, unknown>;
 
 const LUP_BELOW_HTP_SELECTOR = '0x444507e1';
 
+const MOVE_EVENT_BY_ACTION = {
+  move: 'Move',
+  moveToBuffer: 'MoveToBuffer',
+  moveFromBuffer: 'MoveFromBuffer',
+} as const satisfies Record<string, string>;
+
+type MoveAction = keyof typeof MOVE_EVENT_BY_ACTION;
+type MoveEventName = (typeof MOVE_EVENT_BY_ACTION)[MoveAction];
+
 const confirmations = config.transaction.confirmations;
 
 export async function wait(
@@ -93,13 +102,28 @@ export async function handleTransaction(
   try {
     hash = await tx;
     const receipt = await wait(hash, context);
-    status = true;
 
-    if (context && context?.action !== 'reallocate') {
-      const action = context.action as string;
-      const amount = getAmountMoved(receipt, action);
-      assets = amount ?? (context.amount as bigint);
+    const eventName = getMoveEventName(context?.action);
+    if (eventName) {
+      const amount = parseMoveEventAmount(receipt, eventName);
+      if (amount === undefined) {
+        log.error(
+          {
+            event: 'tx_event_missing',
+            phase: 'event_missing',
+            hash,
+            block: receipt.blockNumber,
+            expectedEvent: eventName,
+            ...context,
+          },
+          `transaction confirmed without expected '${eventName}' event; treating as failure`,
+        );
+        return { status: false, assets: 0n };
+      }
+      assets = amount;
     }
+
+    status = true;
 
     if (assets === 0n) {
       log.info(
@@ -164,22 +188,21 @@ export async function handleTransaction(
   };
 }
 
-function getAmountMoved(receipt: any, action: string) {
-  const vaultAbi = getAbi('vault');
-  let amount;
+function getMoveEventName(action: unknown): MoveEventName | undefined {
+  if (typeof action !== 'string') return undefined;
+  return MOVE_EVENT_BY_ACTION[action as MoveAction];
+}
 
-  if (action === 'move' || action === 'moveToBuffer') {
-    const logs = parseEventLogs({
-      abi: vaultAbi,
-      eventName: action,
-      logs: receipt.logs,
-    }) as unknown as Array<{ args: { amount: bigint } }>;
-    amount = logs[0]?.args.amount as bigint;
-  } else {
-    amount = null;
-  }
-
-  return amount;
+function parseMoveEventAmount(
+  receipt: TransactionReceipt,
+  eventName: MoveEventName,
+): bigint | undefined {
+  const logs = parseEventLogs({
+    abi: getAbi('vault'),
+    eventName,
+    logs: receipt.logs,
+  }) as unknown as Array<{ args: { amount: bigint } }>;
+  return logs[0]?.args.amount;
 }
 
 function abridgedViemError(err: unknown) {

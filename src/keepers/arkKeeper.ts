@@ -12,6 +12,7 @@ import { type Address } from 'viem';
 const haltedArks = new Set<Address>();
 let vault: ReturnType<typeof createVault>;
 let _settings: ResolvedArkSettings;
+let _moveStats: { attempted: number; succeeded: number } = { attempted: 0, succeeded: 0 };
 
 // ============= Types =============
 
@@ -47,6 +48,7 @@ export async function arkRun(
 ) {
   vault = createVault(address, vaultAuthAddress);
   _settings = settings;
+  _moveStats = { attempted: 0, succeeded: 0 };
 
   try {
     if (isCurrentArkHalted()) return _logRunExit('keeper halted');
@@ -196,7 +198,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       [op.to, op.amount],
       vault.getAddress(),
     );
-    return await handleTransaction(vault.moveFromBuffer(op.to as bigint, op.amount, gas), {
+    return await _executeMoveTransaction(vault.moveFromBuffer(op.to as bigint, op.amount, gas), {
       action: 'moveFromBuffer',
       to: op.to,
       amount: op.amount,
@@ -209,7 +211,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       [op.from, op.amount],
       vault.getAddress(),
     );
-    return await handleTransaction(vault.moveToBuffer(op.from, op.amount, gas), {
+    return await _executeMoveTransaction(vault.moveToBuffer(op.from, op.amount, gas), {
       action: 'moveToBuffer',
       from: op.from,
       amount: op.amount,
@@ -222,7 +224,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       [op.from, op.to, op.amount],
       vault.getAddress(),
     );
-    return await handleTransaction(vault.move(op.from, op.to, op.amount, gas), {
+    return await _executeMoveTransaction(vault.move(op.from, op.to, op.amount, gas), {
       action: 'move',
       from: op.from,
       to: op.to,
@@ -230,6 +232,15 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       ark: vault.getAddress(),
     });
   }
+}
+
+async function _executeMoveTransaction(
+  ...args: Parameters<typeof handleTransaction>
+): Promise<TransactionData> {
+  const result = await handleTransaction(...args);
+  _moveStats.attempted++;
+  if (result.status) _moveStats.succeeded++;
+  return result;
 }
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
@@ -250,7 +261,7 @@ async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promi
     vaultAddress,
   );
 
-  await handleTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
+  await _executeMoveTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
     action: 'moveFromBuffer',
     to: targetBucket,
     amount: amount,
@@ -289,7 +300,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       [bucket, amountToMove],
       vaultAddress,
     );
-    const txData = await handleTransaction(vault.moveToBuffer(bucket, amountToMove, gas), {
+    const txData = await _executeMoveTransaction(vault.moveToBuffer(bucket, amountToMove, gas), {
       action: 'moveToBuffer',
       from: bucket,
       amount: amountToMove,
@@ -510,16 +521,25 @@ function _logRunExit(reason: string): never {
 
 async function logFinalState(data: KeeperRunData): Promise<void> {
   const finalBufferTotal = await vault.getBufferTotal();
+  const { attempted, succeeded } = _moveStats;
+  const hasFailures = attempted > succeeded;
+  const event = hasFailures ? 'ark_run_partially_complete' : 'ark_run_complete';
+  const ark = vault.getAddress();
+  const message = hasFailures
+    ? `ark run partially complete for ark ${ark} (${succeeded}/${attempted} moves succeeded)`
+    : `ark run complete for ark ${ark}`;
 
   log.info(
     {
-      event: 'ark_run_complete',
-      ark: vault.getAddress(),
+      event,
+      ark,
       bufferTotal: finalBufferTotal,
       bufferTarget: data.bufferTarget,
       quoteTokenPrice: data.price,
       optimalBucket: data.optimalBucket,
+      movesAttempted: attempted,
+      movesSucceeded: succeeded,
     },
-    `ark run complete for ark ${vault.getAddress()}`,
+    message,
   );
 }
