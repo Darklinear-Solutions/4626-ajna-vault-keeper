@@ -61,11 +61,25 @@ export async function _getUnsettledAuctions(
     return result;
   } catch (err) {
     log.error(
-      { event: 'subgraph_query_failed', url: env.SUBGRAPH_URL, ark: vault.getAddress(), err },
+      {
+        event: 'subgraph_query_failed',
+        subgraphOrigin: safeOrigin(env.SUBGRAPH_URL),
+        ark: vault.getAddress(),
+        err,
+      },
       'subgraph query failed',
     );
 
     return config.keeper.exitOnSubgraphFailure ? 'error' : { liquidationAuctions: [] };
+  }
+}
+
+function safeOrigin(rawUrl: string | undefined): string | undefined {
+  if (!rawUrl) return undefined;
+  try {
+    return new URL(rawUrl).origin;
+  } catch {
+    return undefined;
   }
 }
 

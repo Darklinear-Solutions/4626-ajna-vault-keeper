@@ -82,3 +82,84 @@ describe('subgraph failure handling', () => {
     expect(vault.getAuctionStatus).not.toHaveBeenCalled();
   });
 });
+
+describe('subgraph URL redaction in failure logs', () => {
+  async function captureFailureLog(subgraphUrl: string): Promise<Record<string, unknown>> {
+    const request = vi.fn().mockRejectedValue(new Error('subgraph unavailable'));
+    const error = vi.fn();
+    const vault = makeVault();
+
+    vi.doMock('graphql-request', () => ({
+      gql: (strings: TemplateStringsArray) => strings[0] ?? '',
+      request,
+    }));
+    vi.doMock('../../src/utils/env', () => ({
+      env: { SUBGRAPH_URL: subgraphUrl },
+    }));
+    vi.doMock('../../src/utils/config', () => ({
+      config: {
+        keeper: { exitOnSubgraphFailure: true },
+        arkGlobal: { maxAuctionAge: 259200 },
+      },
+    }));
+    vi.doMock('../../src/utils/logger', () => ({
+      log: { error },
+    }));
+
+    const { _getUnsettledAuctions } = await import('../../src/subgraph/poolHealth');
+    await _getUnsettledAuctions(vault);
+
+    expect(error).toHaveBeenCalledTimes(1);
+    const [logFields] = error.mock.calls[0]!;
+    return logFields as Record<string, unknown>;
+  }
+
+  it('strips an API key embedded in the URL path', async () => {
+    const apiKey = 'deadbeefcafef00d1234567890abcdef';
+    const logFields = await captureFailureLog(
+      `https://gateway.thegraph.com/api/${apiKey}/subgraphs/id/QmAbc`,
+    );
+
+    expect(logFields).toMatchObject({
+      event: 'subgraph_query_failed',
+      subgraphOrigin: 'https://gateway.thegraph.com',
+    });
+    expect(logFields).not.toHaveProperty('url');
+    expect(JSON.stringify(logFields)).not.toContain(apiKey);
+  });
+
+  it('strips an API key embedded in the query string', async () => {
+    const apiKey = 'sk_live_supersecretkey_4242';
+    const logFields = await captureFailureLog(
+      `https://api.example.test/subgraph?api-key=${apiKey}`,
+    );
+
+    expect(logFields).toMatchObject({
+      event: 'subgraph_query_failed',
+      subgraphOrigin: 'https://api.example.test',
+    });
+    expect(JSON.stringify(logFields)).not.toContain(apiKey);
+  });
+
+  it('strips credentials embedded in the URL userinfo', async () => {
+    const password = 'hunter2-correct-horse-battery';
+    const logFields = await captureFailureLog(
+      `https://user:${password}@subgraph.example.test/sub/v1`,
+    );
+
+    expect(logFields).toMatchObject({
+      event: 'subgraph_query_failed',
+      subgraphOrigin: 'https://subgraph.example.test',
+    });
+    expect(JSON.stringify(logFields)).not.toContain(password);
+    expect(JSON.stringify(logFields)).not.toContain('user:');
+  });
+
+  it('omits the origin field without throwing when the URL cannot be parsed', async () => {
+    const logFields = await captureFailureLog('not a real url with embedded-secret-xyz');
+
+    expect(logFields).toMatchObject({ event: 'subgraph_query_failed' });
+    expect(logFields.subgraphOrigin).toBeUndefined();
+    expect(JSON.stringify(logFields)).not.toContain('embedded-secret-xyz');
+  });
+});
