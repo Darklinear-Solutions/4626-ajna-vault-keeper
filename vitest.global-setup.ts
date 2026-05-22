@@ -3,14 +3,16 @@ import { spawn, spawnSync } from 'child_process';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import { createTestConfigPath, loadTestEnv, removeTestConfigPath } from './vitest.testEnv.ts';
 
-dotenv.config({ path: '.env.test' });
+loadTestEnv('.env');
 process.env.TEST_ENV = 'true';
 if (!process.env.MAINNET_RPC_URL) {
   process.env.MAINNET_RPC_URL = 'https://eth.drpc.org';
 }
 process.env.RPC_URL = 'http://127.0.0.1:8545';
 process.env.PRIVATE_KEY = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+process.env.CONFIG_PATH = createTestConfigPath();
 
 let anvilProcess: ReturnType<typeof spawn>;
 
@@ -104,10 +106,7 @@ async function deployContracts(): Promise<void> {
         ark.vaultAddress = addresses.VAULT_ADDRESS;
         ark.vaultAuthAddress = addresses.VAULT_AUTH_ADDRESS;
       }
-      fs.writeFileSync(
-        path.join(process.cwd(), 'config.json'),
-        JSON.stringify(testConfig, null, 2),
-      );
+      fs.writeFileSync(process.env.CONFIG_PATH!, JSON.stringify(testConfig, null, 2));
     } else {
       process.env.AAVE_VAULT_ADDRESS = addresses.AAVE_VAULT_ADDRESS;
       process.env.ARK_1_ADDRESS = addresses.ARK_1_ADDRESS;
@@ -133,10 +132,7 @@ async function deployContracts(): Promise<void> {
       testConfig.arks[1].vaultAuthAddress = addresses.ARK_AUTH_2_ADDRESS;
       testConfig.arks[2].vaultAuthAddress = addresses.ARK_AUTH_3_ADDRESS;
       testConfig.buffer.address = addresses.AAVE_VAULT_ADDRESS;
-      fs.writeFileSync(
-        path.join(process.cwd(), 'config.json'),
-        JSON.stringify(testConfig, null, 2),
-      );
+      fs.writeFileSync(process.env.CONFIG_PATH!, JSON.stringify(testConfig, null, 2));
     }
   } else {
     throw new Error('Deployment addresses file not found');
@@ -254,4 +250,5 @@ async function fundTestAccount() {
 
 export async function teardown() {
   anvilProcess?.kill();
+  removeTestConfigPath(process.env.CONFIG_PATH);
 }
