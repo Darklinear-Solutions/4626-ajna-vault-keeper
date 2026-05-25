@@ -413,6 +413,88 @@ describe('config: ark validation', () => {
   });
 });
 
+describe('config: ark.address must equal vaultAddress in metavault mode', () => {
+  it('rejects metavault config where ark.address differs from vaultAddress', async () => {
+    mockConfigFs(
+      makeConfig({
+        metavaultAddress: A7,
+        arks: [
+          {
+            address: A4,
+            vaultAddress: A5,
+            vaultAuthAddress: A6,
+            allocation: { min: 0, max: 60 },
+          },
+        ],
+        buffer: { address: A3, allocation: 40 },
+      }),
+    );
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow(
+      `config.json: arks[0].address (${A4}) must equal arks[0].vaultAddress (${A5}) in metavault mode`,
+    );
+  });
+
+  it('accepts metavault config where ark.address equals vaultAddress', async () => {
+    mockConfigFs(
+      makeConfig({
+        metavaultAddress: A7,
+        arks: [
+          {
+            address: A4,
+            vaultAddress: A4,
+            vaultAuthAddress: A6,
+            allocation: { min: 0, max: 60 },
+          },
+        ],
+        buffer: { address: A3, allocation: 40 },
+      }),
+    );
+    const { config } = await import('../../src/utils/config.ts');
+    expect(config.arks[0]!.address.toLowerCase()).toBe(config.arks[0]!.vaultAddress.toLowerCase());
+  });
+
+  it('accepts metavault config where ark.address and vaultAddress differ only by checksum casing', async () => {
+    const lower = '0x000000000000000000000000000000000000000a';
+    const upper = '0x000000000000000000000000000000000000000A';
+    mockConfigFs(
+      makeConfig({
+        metavaultAddress: A7,
+        arks: [
+          {
+            address: lower,
+            vaultAddress: upper,
+            vaultAuthAddress: A6,
+            allocation: { min: 0, max: 60 },
+          },
+        ],
+        buffer: { address: A3, allocation: 40 },
+      }),
+    );
+    const { config } = await import('../../src/utils/config.ts');
+    expect(config.arks[0]!.address.toLowerCase()).toBe(config.arks[0]!.vaultAddress.toLowerCase());
+  });
+
+  it('does not enforce the equality check outside metavault mode', async () => {
+    mockConfigFs(
+      makeConfig({
+        arks: [
+          {
+            address: A4,
+            vaultAddress: A5,
+            vaultAuthAddress: A6,
+            allocation: { min: 0, max: 30 },
+          },
+        ],
+        buffer: { address: A3, allocation: 0 },
+      }),
+    );
+    const { config } = await import('../../src/utils/config.ts');
+    expect(config.metavaultAddress).toBeUndefined();
+    expect(config.arks[0]!.address).toBe(A4);
+    expect(config.arks[0]!.vaultAddress).toBe(A5);
+  });
+});
+
 describe('config: allocation sum in metavault mode', () => {
   it('rejects metavault config when ark.max sum + buffer != 100, even when buffer.allocation is zero', async () => {
     mockConfigFs(

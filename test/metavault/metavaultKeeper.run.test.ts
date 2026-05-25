@@ -32,7 +32,6 @@ class SubgraphUnavailableErrorStub extends Error {
 type ArkConfig = {
   address: Address;
   allocation: { min: number; max: number };
-  vaultAddress?: Address;
 };
 
 function buildVaultFixture(
@@ -273,51 +272,6 @@ describe('metavaultRun orchestration', () => {
     expect(liveVaultA.moveToBuffer).not.toHaveBeenCalled();
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'halted_arks_detected', arks: [ARK_A] }),
-      expect.stringContaining('halted'),
-    );
-  });
-
-  // Regression (DIFFERENTIAL_REVIEW_REPORT #12, halt-key contract): halts are populated under
-  // the ark's `vaultAddress` — that's the value the scheduler passes to arkRun() and the value
-  // metavault pre-moves put into the transaction context (`{ ark: vaultAddress }`), which is
-  // what `haltKeeper` consumes via `transaction.ts:getArkAddress`. The metavault's strategy
-  // identity is `address`. Per report #13, these are permitted to differ today. The halt
-  // short-circuit must consult both keys, or it silently misses every halt fired by the ark
-  // keeper for a config whose `address ≠ vaultAddress`.
-  it('detects a halt keyed by vaultAddress even when it differs from the metavault address', async () => {
-    const ARK_A_STRATEGY = ARK_A;
-    const ARK_A_VAULT = '0x00000000000000000000000000000000000000d4' as Address;
-    const liveVaultA = buildVaultFixture(ARK_A_STRATEGY, { rate: 100n });
-    const liveVaultB = buildVaultFixture(ARK_B, { rate: 300n });
-
-    const { metavaultRun, reallocate, selectBuckets, handleTransaction, log } =
-      await setupMetavaultRunTest({
-        arkConfigs: [
-          { address: ARK_A_STRATEGY, vaultAddress: ARK_A_VAULT, allocation: { min: 5, max: 20 } },
-          { address: ARK_B, allocation: { min: 5, max: 60 } },
-        ],
-        balances: {
-          [BUFFER]: 400n * S,
-          [ARK_A_STRATEGY]: 300n * S,
-          [ARK_B]: 300n * S,
-        },
-        bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
-        vaults: { [ARK_A_STRATEGY]: liveVaultA, [ARK_B]: liveVaultB },
-        haltedArks: [ARK_A_VAULT],
-      });
-
-    await metavaultRun();
-
-    expect(selectBuckets).not.toHaveBeenCalled();
-    expect(reallocate).not.toHaveBeenCalled();
-    expect(handleTransaction).not.toHaveBeenCalled();
-    expect(liveVaultA.drain).not.toHaveBeenCalled();
-    expect(liveVaultA.moveToBuffer).not.toHaveBeenCalled();
-    // The log surfaces the metavault-canonical identity (`address`) for operator continuity
-    // with the rest of metavault logging, even though the halt was recorded under
-    // `vaultAddress`. Operators correlate by config index / strategy identity.
-    expect(log.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'halted_arks_detected', arks: [ARK_A_STRATEGY] }),
       expect.stringContaining('halted'),
     );
   });

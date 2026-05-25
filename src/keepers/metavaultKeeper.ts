@@ -29,7 +29,6 @@ export type Ark = {
 
 export type ArkAllocation = {
   id: Address;
-  vaultAddress?: Address;
   assets: bigint;
   initialAssets: bigint;
   realInitialAssets: bigint;
@@ -138,7 +137,6 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
 
     allocations.push({
       id: arkConfig.address,
-      vaultAddress: arkConfig.vaultAddress,
       assets: cappedBalance,
       initialAssets: cappedBalance,
       realInitialAssets: balance,
@@ -303,12 +301,11 @@ export function _reallocateForRates(
 // ============= MoveToBuffer Execution =============
 
 async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
-  const plans: Array<{ ark: ArkAllocation; vaultAddress: Address; plan: BucketMove[] }> = [];
+  const plans: Array<{ ark: ArkAllocation; plan: BucketMove[] }> = [];
 
   for (const ark of arks) {
     if (ark.assets >= ark.initialAssets) continue;
 
-    const vaultAddress = ark.vaultAddress ?? ark.vault.getAddress();
     const assetDecimals = (await ark.vault.getAssetDecimals()) as number;
     const amountToMoveWad = toWad(ark.initialAssets - ark.assets, assetDecimals);
     const bucketPlan = await selectBuckets(ark.vault, amountToMoveWad);
@@ -316,31 +313,31 @@ async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
     const plannedCoverage = bucketPlan.reduce((sum, p) => sum + p.amount, 0n);
     if (plannedCoverage < amountToMoveWad) {
       return _logRunExit(
-        `bucket plan for ark ${vaultAddress} covers ${plannedCoverage} of planned decrease ${amountToMoveWad}`,
+        `bucket plan for ark ${ark.id} covers ${plannedCoverage} of planned decrease ${amountToMoveWad}`,
       );
     }
 
-    plans.push({ ark, vaultAddress, plan: bucketPlan });
+    plans.push({ ark, plan: bucketPlan });
   }
 
-  for (const { ark, vaultAddress, plan } of plans) {
+  for (const { ark, plan } of plans) {
     for (const { bucket, amount } of plan) {
       const drainTx = await handleTransaction(ark.vault.drain(bucket), {
         action: 'drain',
         bucket,
-        ark: vaultAddress,
+        ark: ark.id,
       });
-      if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
+      if (!drainTx.status) return _logRunExit(`drain failed for ark ${ark.id}`);
 
       const gas = await getGasWithBuffer('vault', 'moveToBuffer', [bucket, amount], ark.id);
       const moveTx = await handleTransaction(ark.vault.moveToBuffer(bucket, amount, gas), {
         action: 'moveToBuffer',
         from: bucket,
         amount,
-        ark: vaultAddress,
+        ark: ark.id,
       });
 
-      if (!moveTx.status) return _logRunExit(`moveToBuffer failed for ark ${vaultAddress}`);
+      if (!moveTx.status) return _logRunExit(`moveToBuffer failed for ark ${ark.id}`);
     }
   }
 }
@@ -491,7 +488,5 @@ async function _getPausedArks(): Promise<Address[]> {
 }
 
 function _getHaltedArks(): Address[] {
-  return config.arks
-    .filter((a) => isArkHalted(a.vaultAddress) || isArkHalted(a.address))
-    .map((a) => a.address);
+  return config.arks.filter((a) => isArkHalted(a.address)).map((a) => a.address);
 }

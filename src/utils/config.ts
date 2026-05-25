@@ -315,7 +315,12 @@ function validateArks(c: RawConfig): void {
 
     const rawAddress = (ark as { address?: unknown }).address;
     if (metavaultMode) {
-      requireAddress(rawAddress, `${at}.address`);
+      const address = requireAddress(rawAddress, `${at}.address`);
+      if (address.toLowerCase() !== ark.vaultAddress.toLowerCase()) {
+        throwConfigError(
+          `${at}.address (${address}) must equal ${at}.vaultAddress (${ark.vaultAddress}) in metavault mode`,
+        );
+      }
     } else if (typeof rawAddress === 'string' && rawAddress !== '') {
       requireAddress(rawAddress, `${at}.address`);
     }

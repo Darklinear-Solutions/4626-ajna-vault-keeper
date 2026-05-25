@@ -497,12 +497,14 @@ export function initArkKeeper(
 }
 
 export function isArkHalted(address: Address): boolean {
-  return haltedArks.has(address);
+  return haltedArks.has(address.toLowerCase() as Address);
 }
 
 export function haltKeeper(address?: Address) {
-  const ark = address ?? vault?.getAddress?.();
-  if (!ark || haltedArks.has(ark)) return;
+  const raw = address ?? vault?.getAddress?.();
+  if (!raw) return;
+  const ark = raw.toLowerCase() as Address;
+  if (haltedArks.has(ark)) return;
 
   haltedArks.add(ark);
   log.warn(
