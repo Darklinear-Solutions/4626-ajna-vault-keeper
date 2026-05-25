@@ -21,8 +21,9 @@ function makeVault() {
 }
 
 describe('subgraph failure handling', () => {
-  it('fails closed when the subgraph query throws and exitOnSubgraphFailure is enabled', async () => {
-    const request = vi.fn().mockRejectedValue(new Error('subgraph unavailable'));
+  it('fails closed by throwing SubgraphUnavailableError when exitOnSubgraphFailure is enabled', async () => {
+    const cause = new Error('subgraph unavailable');
+    const request = vi.fn().mockRejectedValue(cause);
     const error = vi.fn();
     const vault = makeVault();
 
@@ -43,10 +44,15 @@ describe('subgraph failure handling', () => {
       log: { error },
     }));
 
-    const { _getUnsettledAuctions, poolHasBadDebt } = await import('../../src/subgraph/poolHealth');
+    const { _getUnsettledAuctions, poolHasBadDebt, SubgraphUnavailableError } = await import(
+      '../../src/subgraph/poolHealth'
+    );
 
-    await expect(_getUnsettledAuctions(vault)).resolves.toBe('error');
-    await expect(poolHasBadDebt(vault)).resolves.toBe(true);
+    const subgraphFailure = await _getUnsettledAuctions(vault).catch((e) => e);
+    expect(subgraphFailure).toBeInstanceOf(SubgraphUnavailableError);
+    expect((subgraphFailure as Error).cause).toBe(cause);
+
+    await expect(poolHasBadDebt(vault)).rejects.toBeInstanceOf(SubgraphUnavailableError);
     expect(vault.getAuctionStatus).not.toHaveBeenCalled();
     expect(error).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'subgraph_query_failed', ark: VAULT_ADDRESS }),
@@ -107,7 +113,7 @@ describe('subgraph URL redaction in failure logs', () => {
     }));
 
     const { _getUnsettledAuctions } = await import('../../src/subgraph/poolHealth');
-    await _getUnsettledAuctions(vault);
+    await _getUnsettledAuctions(vault).catch(() => undefined);
 
     expect(error).toHaveBeenCalledTimes(1);
     const [logFields] = error.mock.calls[0]!;

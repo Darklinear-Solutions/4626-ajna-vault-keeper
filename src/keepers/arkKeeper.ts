@@ -5,7 +5,7 @@ import { toWad } from '../utils/decimalConversion.ts';
 import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
 import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction.ts';
 import { getPrice } from '../oracle/price.ts';
-import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
+import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
 import { createVault } from '../ark/vault.ts';
 import { type Address } from 'viem';
 
@@ -85,6 +85,14 @@ export async function arkRun(
     await rebalanceBuffer(data);
     await logFinalState(data);
   } catch (e) {
+    if (e instanceof SubgraphUnavailableError) {
+      const ark = vault.getAddress();
+      log.error(
+        { event: 'ark_run_aborted', ark, reason: 'subgraph unavailable', err: e },
+        `ark run aborted for ark ${ark}: subgraph unavailable`,
+      );
+      return;
+    }
     if (!(e instanceof RunAbortError)) throw e;
   }
 }

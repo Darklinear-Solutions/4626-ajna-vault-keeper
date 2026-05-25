@@ -63,6 +63,7 @@ describe('ark halt scoping', () => {
     }));
     vi.doMock('../../src/subgraph/poolHealth.ts', () => ({
       poolHasBadDebt: vi.fn().mockResolvedValue(false),
+      SubgraphUnavailableError: class extends Error {},
     }));
     vi.doMock('../../src/utils/transaction.ts', () => ({
       getGasWithBuffer: vi.fn().mockResolvedValue(1n),

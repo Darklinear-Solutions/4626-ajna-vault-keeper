@@ -21,6 +21,7 @@ const padAwareTolerance = (totalAssets: bigint): bigint => {
 
 vi.mock('../../src/subgraph/poolHealth.ts', () => ({
   poolHasBadDebt: vi.fn().mockResolvedValue(false),
+  SubgraphUnavailableError: class extends Error {},
 }));
 
 describe('metavault keeper run', () => {

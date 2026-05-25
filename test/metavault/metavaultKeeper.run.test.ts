@@ -22,6 +22,13 @@ const ARK_B = '0x00000000000000000000000000000000000000b2' as Address;
 const S = 1_000_000n;
 const TX_HASH = '0x1111111111111111111111111111111111111111111111111111111111111111' as const;
 
+class SubgraphUnavailableErrorStub extends Error {
+  constructor(cause?: unknown) {
+    super('subgraph query failed in fail-closed mode', { cause });
+    this.name = 'SubgraphUnavailableError';
+  }
+}
+
 type ArkConfig = {
   address: Address;
   allocation: { min: number; max: number };
@@ -50,6 +57,7 @@ function resetMetavaultKeeperModules() {
   vi.resetModules();
   vi.doUnmock('../../src/utils/config.ts');
   vi.doUnmock('../../src/ark/vault.ts');
+  vi.doUnmock('../../src/keepers/arkKeeper.ts');
   vi.doUnmock('../../src/metavault/metavault.ts');
   vi.doUnmock('../../src/metavault/utils/evaluateRates.ts');
   vi.doUnmock('../../src/subgraph/poolHealth.ts');
@@ -83,6 +91,8 @@ async function setupMetavaultRunTest({
   bucketPlan = [],
   poolBalanceCaps = {},
   accrued = {},
+  poolHasBadDebt = vi.fn().mockResolvedValue(false),
+  haltedArks = [],
 }: {
   arkConfigs?: ArkConfig[];
   balances?: Partial<Record<Address, bigint>>;
@@ -92,6 +102,8 @@ async function setupMetavaultRunTest({
   bucketPlan?: Array<{ bucket: bigint; amount: bigint }>;
   poolBalanceCaps?: Partial<Record<Address, bigint>>;
   accrued?: Partial<Record<Address, bigint>>;
+  poolHasBadDebt?: (vault: { getAddress: () => Address }) => Promise<boolean>;
+  haltedArks?: Address[];
 } = {}) {
   const vaultFixtures = {
     [ARK_A]: buildVaultFixture(ARK_A, { rate: 100n }),
@@ -161,6 +173,11 @@ async function setupMetavaultRunTest({
       return fixture;
     }),
   }));
+  const haltedSet = new Set<Address>(haltedArks);
+  const isArkHalted = vi.fn((address: Address) => haltedSet.has(address));
+  vi.doMock('../../src/keepers/arkKeeper.ts', () => ({
+    isArkHalted,
+  }));
   vi.doMock('../../src/metavault/metavault.ts', () => ({
     getExpectedSupplyAssets,
     getTotalExpectedSupplyAssets,
@@ -170,7 +187,8 @@ async function setupMetavaultRunTest({
     evaluateRates,
   }));
   vi.doMock('../../src/subgraph/poolHealth.ts', () => ({
-    poolHasBadDebt: vi.fn().mockResolvedValue(false),
+    poolHasBadDebt,
+    SubgraphUnavailableError: SubgraphUnavailableErrorStub,
   }));
   vi.doMock('../../src/ark/utils/selectBuckets.ts', () => ({
     selectBuckets,
@@ -195,10 +213,115 @@ async function setupMetavaultRunTest({
     selectBuckets,
     handleTransaction,
     getGasWithBuffer,
+    poolHasBadDebt,
+    isArkHalted,
+    log,
   };
 }
 
 describe('metavaultRun orchestration', () => {
+  // Regression (DIFFERENTIAL_REVIEW_REPORT #12): an ark halted by a previous LUPBelowHTP
+  // transaction failure (via haltKeeper() in transaction.ts) must be treated like a paused ark
+  // at the start of the next metavault run. Including a halted ark in allocation planning
+  // produces a target that contradicts the intended configuration — the same correctness
+  // argument that justifies the existing pause short-circuit.
+  it('suppresses transaction-producing paths when any configured ark is halted', async () => {
+    const liveVaultA = buildVaultFixture(ARK_A, { rate: 100n });
+    const liveVaultB = buildVaultFixture(ARK_B, { rate: 300n });
+
+    const {
+      metavaultRun,
+      getTotalExpectedSupplyAssets,
+      reallocate,
+      selectBuckets,
+      handleTransaction,
+      isArkHalted,
+      log,
+    } = await setupMetavaultRunTest({
+      balances: {
+        [BUFFER]: 400n * S,
+        [ARK_A]: 300n * S,
+        [ARK_B]: 300n * S,
+      },
+      evaluations: [
+        { address: ARK_A, targets: [ARK_B] },
+        { address: ARK_B, targets: [] },
+      ],
+      bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+      vaults: {
+        [ARK_A]: liveVaultA,
+        [ARK_B]: liveVaultB,
+      },
+      haltedArks: [ARK_A],
+    });
+
+    await metavaultRun();
+
+    expect(isArkHalted).toHaveBeenCalledWith(ARK_A);
+    expect(isArkHalted).toHaveBeenCalledWith(ARK_B);
+    expect(getTotalExpectedSupplyAssets).not.toHaveBeenCalled();
+    expect(selectBuckets).not.toHaveBeenCalled();
+    expect(reallocate).not.toHaveBeenCalled();
+    expect(handleTransaction).not.toHaveBeenCalled();
+    // The halt check is a pure, in-memory short-circuit. It must run before the paused-arks
+    // probe so we never burn an RPC on isPaused() when planning is already known to be unsafe.
+    expect(liveVaultA.isPaused).not.toHaveBeenCalled();
+    expect(liveVaultB.isPaused).not.toHaveBeenCalled();
+    expect(liveVaultA.getBorrowFeeRate).not.toHaveBeenCalled();
+    expect(liveVaultB.getBorrowFeeRate).not.toHaveBeenCalled();
+    expect(liveVaultA.drain).not.toHaveBeenCalled();
+    expect(liveVaultA.moveToBuffer).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'halted_arks_detected', arks: [ARK_A] }),
+      expect.stringContaining('halted'),
+    );
+  });
+
+  // Regression (DIFFERENTIAL_REVIEW_REPORT #12, halt-key contract): halts are populated under
+  // the ark's `vaultAddress` — that's the value the scheduler passes to arkRun() and the value
+  // metavault pre-moves put into the transaction context (`{ ark: vaultAddress }`), which is
+  // what `haltKeeper` consumes via `transaction.ts:getArkAddress`. The metavault's strategy
+  // identity is `address`. Per report #13, these are permitted to differ today. The halt
+  // short-circuit must consult both keys, or it silently misses every halt fired by the ark
+  // keeper for a config whose `address ≠ vaultAddress`.
+  it('detects a halt keyed by vaultAddress even when it differs from the metavault address', async () => {
+    const ARK_A_STRATEGY = ARK_A;
+    const ARK_A_VAULT = '0x00000000000000000000000000000000000000d4' as Address;
+    const liveVaultA = buildVaultFixture(ARK_A_STRATEGY, { rate: 100n });
+    const liveVaultB = buildVaultFixture(ARK_B, { rate: 300n });
+
+    const { metavaultRun, reallocate, selectBuckets, handleTransaction, log } =
+      await setupMetavaultRunTest({
+        arkConfigs: [
+          { address: ARK_A_STRATEGY, vaultAddress: ARK_A_VAULT, allocation: { min: 5, max: 20 } },
+          { address: ARK_B, allocation: { min: 5, max: 60 } },
+        ],
+        balances: {
+          [BUFFER]: 400n * S,
+          [ARK_A_STRATEGY]: 300n * S,
+          [ARK_B]: 300n * S,
+        },
+        bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+        vaults: { [ARK_A_STRATEGY]: liveVaultA, [ARK_B]: liveVaultB },
+        haltedArks: [ARK_A_VAULT],
+      });
+
+    await metavaultRun();
+
+    expect(selectBuckets).not.toHaveBeenCalled();
+    expect(reallocate).not.toHaveBeenCalled();
+    expect(handleTransaction).not.toHaveBeenCalled();
+    expect(liveVaultA.drain).not.toHaveBeenCalled();
+    expect(liveVaultA.moveToBuffer).not.toHaveBeenCalled();
+    // The log surfaces the metavault-canonical identity (`address`) for operator continuity
+    // with the rest of metavault logging, even though the halt was recorded under
+    // `vaultAddress`. Operators correlate by config index / strategy identity.
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'halted_arks_detected', arks: [ARK_A_STRATEGY] }),
+      expect.stringContaining('halted'),
+    );
+  });
+
   it('suppresses transaction-producing paths when any configured ark is paused', async () => {
     const pausedVault = buildVaultFixture(ARK_A, { paused: true, rate: 100n });
     const liveVault = buildVaultFixture(ARK_B, { rate: 300n });
@@ -559,5 +682,71 @@ describe('metavaultRun orchestration', () => {
     expect(callsPer(BUFFER)).toBe(1);
     expect(callsPer(ARK_A)).toBe(1);
     expect(callsPer(ARK_B)).toBe(1);
+  });
+
+  // Regression (DIFFERENTIAL_REVIEW_REPORT #11): in fail-closed mode a subgraph outage must
+  // halt the entire metavault run, not silently degrade to "all arks have bad debt". The
+  // previous behavior conflated subgraph failure with confirmed bad debt: inbound allocation
+  // to those arks was blocked, but the keeper still pre-moved and submitted reallocate(),
+  // operating on stale risk data while the bad-debt oracle was unavailable.
+  it('aborts the run without pre-moves or reallocate when poolHasBadDebt fails closed', async () => {
+    const poolHasBadDebt = vi.fn(async () => {
+      throw new SubgraphUnavailableErrorStub();
+    });
+
+    const { metavaultRun, vaults, selectBuckets, handleTransaction, reallocate, log } =
+      await setupMetavaultRunTest({
+        balances: {
+          [BUFFER]: 400n * S,
+          [ARK_A]: 300n * S,
+          [ARK_B]: 300n * S,
+        },
+        bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+        evaluations: [],
+        poolHasBadDebt,
+      });
+
+    await metavaultRun();
+
+    expect(poolHasBadDebt).toHaveBeenCalled();
+    expect(selectBuckets).not.toHaveBeenCalled();
+    expect(vaults[ARK_A]!.drain).not.toHaveBeenCalled();
+    expect(vaults[ARK_A]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(vaults[ARK_B]!.drain).not.toHaveBeenCalled();
+    expect(vaults[ARK_B]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(handleTransaction).not.toHaveBeenCalled();
+    expect(reallocate).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'metavault_run_aborted',
+        reason: 'subgraph unavailable',
+      }),
+      expect.stringContaining('subgraph unavailable'),
+    );
+  });
+
+  // Regression: a confirmed per-ark bad-debt flag (subgraph healthy, auction status indicates
+  // bad debt for one ark) must NOT short-circuit the whole run — the keeper continues planning
+  // and can still allocate around the affected ark. This pairs with the abort-on-subgraph-
+  // failure test above to lock in the distinction between "ark has bad debt" and "we cannot
+  // determine bad debt because the subgraph is down."
+  it('does not raise a subgraph-unavailable abort when poolHasBadDebt returns true for a single ark', async () => {
+    const poolHasBadDebt = vi.fn(
+      async (vault: { getAddress: () => Address }) => vault.getAddress() === ARK_A,
+    );
+
+    const { metavaultRun, log } = await setupMetavaultRunTest({
+      bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+      evaluations: [],
+      poolHasBadDebt,
+    });
+
+    await metavaultRun();
+
+    expect(poolHasBadDebt).toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'metavault_run_aborted', reason: 'subgraph unavailable' }),
+      expect.anything(),
+    );
   });
 });

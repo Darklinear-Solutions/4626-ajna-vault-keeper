@@ -19,13 +19,16 @@ type VaultLike = {
   getAuctionStatus: (borrower: Address) => Promise<readonly [bigint, bigint, bigint, ...unknown[]]>;
 };
 
+export class SubgraphUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super('subgraph query failed in fail-closed mode', { cause });
+    this.name = 'SubgraphUnavailableError';
+  }
+}
+
 export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): Promise<boolean> {
-  const unfilteredAuctions = await _getUnsettledAuctions(vault);
-  if (unfilteredAuctions === 'error') return true;
-  const auctionsBeforeCutoff = _filterAuctions(
-    unfilteredAuctions as GetUnsettledAuctionsResponse,
-    maxAuctionAge,
-  );
+  const auctions = await _getUnsettledAuctions(vault);
+  const auctionsBeforeCutoff = _filterAuctions(auctions, maxAuctionAge);
 
   for (let i = 0; i < auctionsBeforeCutoff.length; i++) {
     const [kickTime, collateralRemaining, debtRemaining] = await vault.getAuctionStatus(
@@ -40,7 +43,7 @@ export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): 
 
 export async function _getUnsettledAuctions(
   vault: VaultLike,
-): Promise<GetUnsettledAuctionsResponse | string> {
+): Promise<GetUnsettledAuctionsResponse> {
   try {
     const poolAddress = (await vault.getPoolAddress()).toLowerCase();
     const subgraphUrl = env.SUBGRAPH_URL;
@@ -70,7 +73,8 @@ export async function _getUnsettledAuctions(
       'subgraph query failed',
     );
 
-    return config.keeper.exitOnSubgraphFailure ? 'error' : { liquidationAuctions: [] };
+    if (config.keeper.exitOnSubgraphFailure) throw new SubgraphUnavailableError(err);
+    return { liquidationAuctions: [] };
   }
 }
 

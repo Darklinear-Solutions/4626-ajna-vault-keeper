@@ -1,5 +1,6 @@
 import { config, resolveArkSettings } from '../utils/config.ts';
 import { createVault } from '../ark/vault.ts';
+import { isArkHalted } from './arkKeeper.ts';
 import { evaluateRates, type ArkEvaluation } from '../metavault/utils/evaluateRates.ts';
 import {
   getExpectedSupplyAssets,
@@ -8,7 +9,7 @@ import {
   type MarketAllocation,
 } from '../metavault/metavault.ts';
 import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
-import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
+import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
 import { log } from '../utils/logger.ts';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
 import { selectBuckets, type BucketMove } from '../ark/utils/selectBuckets.ts';
@@ -52,9 +53,17 @@ export type BufferAllocation = {
 
 export async function metavaultRun() {
   try {
+    const haltedArks = _getHaltedArks();
+    if (haltedArks.length > 0) {
+      return log.warn(
+        { event: 'halted_arks_detected', arks: haltedArks },
+        'skipping run: one or more arks are halted',
+      );
+    }
+
     const pausedArks = await _getPausedArks();
     if (pausedArks.length > 0) {
-      return log.info(
+      return log.warn(
         { event: 'paused_arks_detected', arks: pausedArks },
         'skipping run: one or more arks are paused',
       );
@@ -101,6 +110,13 @@ export async function metavaultRun() {
 
     log.info({ event: 'metavault_run_complete', allocations }, 'metavault run complete');
   } catch (e) {
+    if (e instanceof SubgraphUnavailableError) {
+      log.error(
+        { event: 'metavault_run_aborted', reason: 'subgraph unavailable', err: e },
+        'metavault run aborted: subgraph unavailable',
+      );
+      return;
+    }
     if (!(e instanceof RunAbortError)) throw e;
   }
 }
@@ -472,4 +488,10 @@ async function _getPausedArks(): Promise<Address[]> {
     }
   }
   return paused;
+}
+
+function _getHaltedArks(): Address[] {
+  return config.arks
+    .filter((a) => isArkHalted(a.vaultAddress) || isArkHalted(a.address))
+    .map((a) => a.address);
 }
