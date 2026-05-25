@@ -2,6 +2,7 @@ import { gql, request } from 'graphql-request';
 import { env } from '../utils/env.ts';
 import { config } from '../utils/config.ts';
 import { log } from '../utils/logger.ts';
+import { getChainTime } from '../utils/chainTime.ts';
 import type { Address } from 'viem';
 
 type GetUnsettledAuctionsResponse = {
@@ -28,7 +29,8 @@ export class SubgraphUnavailableError extends Error {
 
 export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): Promise<boolean> {
   const auctions = await _getUnsettledAuctions(vault);
-  const auctionsBeforeCutoff = _filterAuctions(auctions, maxAuctionAge);
+  const nowSec = await getChainTime();
+  const auctionsBeforeCutoff = _filterAuctions(auctions, nowSec, maxAuctionAge);
 
   for (let i = 0; i < auctionsBeforeCutoff.length; i++) {
     const [kickTime, collateralRemaining, debtRemaining] = await vault.getAuctionStatus(
@@ -89,6 +91,7 @@ function safeOrigin(rawUrl: string | undefined): string | undefined {
 
 export function _filterAuctions(
   response: GetUnsettledAuctionsResponse,
+  nowSec: bigint,
   maxAuctionAge?: number,
 ): LiquidationAuction[] {
   const unsettledAuctions = response.liquidationAuctions;
@@ -96,13 +99,14 @@ export function _filterAuctions(
 
   if (maxAge === 0) return unsettledAuctions;
 
-  let auctionsBeforeCutoff: LiquidationAuction[] = [];
+  const maxAgeBig = BigInt(maxAge);
+  const auctionsBeforeCutoff: LiquidationAuction[] = [];
 
   for (let i = 0; i < unsettledAuctions.length; i++) {
-    const kickTime = Number(unsettledAuctions[i]!.kickTime);
-    const auctionAge = Math.floor(Date.now() / 1000) - kickTime;
+    const kickTime = BigInt(unsettledAuctions[i]!.kickTime);
+    const auctionAge = nowSec - kickTime;
 
-    if (auctionAge > maxAge) {
+    if (auctionAge > maxAgeBig) {
       auctionsBeforeCutoff.push(unsettledAuctions[i]!);
     }
   }

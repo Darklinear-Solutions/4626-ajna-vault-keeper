@@ -7,6 +7,7 @@ import { getGasWithBuffer, handleTransaction, type TransactionData } from '../ut
 import { getPrice } from '../oracle/price.ts';
 import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
 import { createVault } from '../ark/vault.ts';
+import { getChainTime, ChainTimeUnavailableError } from '../utils/chainTime.ts';
 import { type Address } from 'viem';
 
 const haltedArks = new Set<Address>();
@@ -75,7 +76,9 @@ export async function arkRun(
     if (!(await isOptimalBucketInRange(data)))
       return _logRunExit('optimal bucket is not in interest-earning range');
     if (await isOptimalBucketDusty(data)) return _logRunExit('optimal bucket is dusty');
-    if (await isOptimalBucketRecentlyBankrupt(data))
+
+    const nowSec = await getChainTime();
+    if (await isOptimalBucketRecentlyBankrupt(data, nowSec))
       return _logRunExit('optimal bucket was recently bankrupt');
     if (await vault.isBucketDebtLocked(data.optimalBucket))
       return _logRunExit('optimal bucket debt is locked due to pending auction');
@@ -85,11 +88,18 @@ export async function arkRun(
     await rebalanceBuffer(data);
     await logFinalState(data);
   } catch (e) {
+    const ark = vault.getAddress();
     if (e instanceof SubgraphUnavailableError) {
-      const ark = vault.getAddress();
       log.error(
         { event: 'ark_run_aborted', ark, reason: 'subgraph unavailable', err: e },
         `ark run aborted for ark ${ark}: subgraph unavailable`,
+      );
+      return;
+    }
+    if (e instanceof ChainTimeUnavailableError) {
+      log.error(
+        { event: 'ark_run_aborted', ark, reason: 'chain time unavailable', err: e },
+        `ark run aborted for ark ${ark}: chain time unavailable`,
       );
       return;
     }
@@ -363,15 +373,16 @@ async function isOptimalBucketDusty(data: KeeperRunData): Promise<boolean> {
   return bucketLps !== 0n && bucketLps < dustThreshold;
 }
 
-async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boolean> {
+async function isOptimalBucketRecentlyBankrupt(
+  data: KeeperRunData,
+  nowSec: bigint,
+): Promise<boolean> {
   const bankruptcyTimestamp = await vault.getBankruptcyTime(data.optimalBucket);
 
   if (_settings.minTimeSinceBankruptcy === 0n) return bankruptcyTimestamp > 0n;
+  if (bankruptcyTimestamp === 0n) return false;
 
-  return (
-    bankruptcyTimestamp > 0n &&
-    BigInt(Math.floor(Date.now() / 1000)) - bankruptcyTimestamp < _settings.minTimeSinceBankruptcy
-  );
+  return nowSec - bankruptcyTimestamp < _settings.minTimeSinceBankruptcy;
 }
 
 async function optimalBucketHasCollateral(data: KeeperRunData): Promise<boolean> {

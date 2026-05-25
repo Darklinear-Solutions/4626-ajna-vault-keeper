@@ -49,6 +49,7 @@ afterEach(() => {
   vi.doUnmock('../../src/ajna/utils/poolBalanceCap.ts');
   vi.doUnmock('../../src/utils/decimalConversion.ts');
   vi.doUnmock('../../src/utils/logger.ts');
+  vi.doUnmock('../../src/utils/chainTime.ts');
 });
 
 describe('ark halt scoping', () => {
@@ -79,6 +80,10 @@ describe('ark halt scoping', () => {
       toWad: vi.fn((amount: bigint) => amount),
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({ log }));
+    vi.doMock('../../src/utils/chainTime.ts', () => ({
+      getChainTime: vi.fn().mockResolvedValue(0n),
+      ChainTimeUnavailableError: class extends Error {},
+    }));
 
     const { arkRun, haltKeeper, isArkHalted } = await import('../../src/keepers/arkKeeper.ts');
 
@@ -125,6 +130,10 @@ describe('ark halt scoping', () => {
     vi.doMock('../../src/utils/decimalConversion.ts', () => ({ toWad: vi.fn() }));
     vi.doMock('../../src/utils/logger.ts', () => ({
       log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+    }));
+    vi.doMock('../../src/utils/chainTime.ts', () => ({
+      getChainTime: vi.fn().mockResolvedValue(0n),
+      ChainTimeUnavailableError: class extends Error {},
     }));
 
     const { haltKeeper, isArkHalted } = await import('../../src/keepers/arkKeeper.ts');

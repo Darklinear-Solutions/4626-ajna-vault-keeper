@@ -74,6 +74,7 @@ function resetArkKeeperModules() {
   vi.doUnmock('../../src/oracle/price.ts');
   vi.doUnmock('../../src/ajna/utils/poolBalanceCap.ts');
   vi.doUnmock('../../src/utils/logger.ts');
+  vi.doUnmock('../../src/utils/chainTime.ts');
 }
 
 beforeEach(() => {
@@ -110,6 +111,10 @@ describe('ark keeper reserved buffer handling', () => {
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({
       log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+    }));
+    vi.doMock('../../src/utils/chainTime.ts', () => ({
+      getChainTime: vi.fn().mockResolvedValue(0n),
+      ChainTimeUnavailableError: class extends Error {},
     }));
 
     const { arkRun } = await import('../../src/keepers/arkKeeper.ts');

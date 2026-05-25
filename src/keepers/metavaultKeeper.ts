@@ -10,6 +10,7 @@ import {
 } from '../metavault/metavault.ts';
 import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
 import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
+import { ChainTimeUnavailableError } from '../utils/chainTime.ts';
 import { log } from '../utils/logger.ts';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
 import { selectBuckets, type BucketMove } from '../ark/utils/selectBuckets.ts';
@@ -113,6 +114,13 @@ export async function metavaultRun() {
       log.error(
         { event: 'metavault_run_aborted', reason: 'subgraph unavailable', err: e },
         'metavault run aborted: subgraph unavailable',
+      );
+      return;
+    }
+    if (e instanceof ChainTimeUnavailableError) {
+      log.error(
+        { event: 'metavault_run_aborted', reason: 'chain time unavailable', err: e },
+        'metavault run aborted: chain time unavailable',
       );
       return;
     }

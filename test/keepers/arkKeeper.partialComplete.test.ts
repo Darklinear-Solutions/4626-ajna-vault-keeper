@@ -79,6 +79,10 @@ function setupKeeperMocks(
     toWad: vi.fn((amount: bigint) => amount),
   }));
   vi.doMock('../../src/utils/logger.ts', () => ({ log }));
+  vi.doMock('../../src/utils/chainTime.ts', () => ({
+    getChainTime: vi.fn().mockResolvedValue(0n),
+    ChainTimeUnavailableError: class extends Error {},
+  }));
 
   return { log };
 }
@@ -92,6 +96,7 @@ afterEach(() => {
   vi.doUnmock('../../src/ajna/utils/poolBalanceCap.ts');
   vi.doUnmock('../../src/utils/decimalConversion.ts');
   vi.doUnmock('../../src/utils/logger.ts');
+  vi.doUnmock('../../src/utils/chainTime.ts');
 });
 
 describe('arkRun partial-completion log', () => {

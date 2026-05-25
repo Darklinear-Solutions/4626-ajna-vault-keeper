@@ -7,6 +7,7 @@ afterEach(() => {
   vi.doUnmock('../../src/utils/env');
   vi.doUnmock('../../src/utils/config');
   vi.doUnmock('../../src/utils/logger');
+  vi.doUnmock('../../src/utils/chainTime.ts');
 });
 
 const POOL_ADDRESS = '0x0000000000000000000000000000000000000001' as Address;
@@ -41,7 +42,10 @@ describe('subgraph failure handling', () => {
       },
     }));
     vi.doMock('../../src/utils/logger', () => ({
-      log: { error },
+      log: { error, info: vi.fn(), warn: vi.fn() },
+    }));
+    vi.doMock('../../src/utils/chainTime.ts', () => ({
+      getChainTime: vi.fn().mockResolvedValue(0n),
     }));
 
     const { _getUnsettledAuctions, poolHasBadDebt, SubgraphUnavailableError } = await import(
@@ -78,7 +82,10 @@ describe('subgraph failure handling', () => {
       },
     }));
     vi.doMock('../../src/utils/logger', () => ({
-      log: { error: vi.fn() },
+      log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+    }));
+    vi.doMock('../../src/utils/chainTime.ts', () => ({
+      getChainTime: vi.fn().mockResolvedValue(0n),
     }));
 
     const { _getUnsettledAuctions, poolHasBadDebt } = await import('../../src/subgraph/poolHealth');
@@ -109,7 +116,10 @@ describe('subgraph URL redaction in failure logs', () => {
       },
     }));
     vi.doMock('../../src/utils/logger', () => ({
-      log: { error },
+      log: { error, info: vi.fn(), warn: vi.fn() },
+    }));
+    vi.doMock('../../src/utils/chainTime.ts', () => ({
+      getChainTime: vi.fn().mockResolvedValue(0n),
     }));
 
     const { _getUnsettledAuctions } = await import('../../src/subgraph/poolHealth');
