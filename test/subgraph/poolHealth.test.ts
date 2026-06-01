@@ -13,6 +13,7 @@ describe('subgraph query', () => {
   });
 
   it('can filter out auctions newer than the minAge', () => {
+    const nowSec = BigInt(Math.floor(Date.now() / 1000));
     const mockResponse = {
       liquidationAuctions: [
         {
@@ -25,12 +26,12 @@ describe('subgraph query', () => {
         },
         {
           borrower: '0x',
-          kickTime: String(Math.floor(Date.now() / 1000)),
+          kickTime: String(nowSec),
         },
       ],
     };
 
-    const filteredAuctions = _filterAuctions(mockResponse);
+    const filteredAuctions = _filterAuctions(mockResponse, nowSec);
     expect(filteredAuctions.length).toBe(2);
     expect(filteredAuctions[0]?.kickTime).toBe('1725922914');
     expect(filteredAuctions[1]?.kickTime).toBe('1725922914');

@@ -5,13 +5,15 @@ import { toWad } from '../utils/decimalConversion.ts';
 import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
 import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction.ts';
 import { getPrice } from '../oracle/price.ts';
-import { poolHasBadDebt } from '../subgraph/poolHealth.ts';
+import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
 import { createVault } from '../ark/vault.ts';
+import { getChainTime, ChainTimeUnavailableError } from '../utils/chainTime.ts';
 import { type Address } from 'viem';
 
 const haltedArks = new Set<Address>();
 let vault: ReturnType<typeof createVault>;
 let _settings: ResolvedArkSettings;
+let _moveStats: { attempted: number; succeeded: number } = { attempted: 0, succeeded: 0 };
 
 // ============= Types =============
 
@@ -47,6 +49,7 @@ export async function arkRun(
 ) {
   vault = createVault(address, vaultAuthAddress);
   _settings = settings;
+  _moveStats = { attempted: 0, succeeded: 0 };
 
   try {
     if (isCurrentArkHalted()) return _logRunExit('keeper halted');
@@ -73,7 +76,9 @@ export async function arkRun(
     if (!(await isOptimalBucketInRange(data)))
       return _logRunExit('optimal bucket is not in interest-earning range');
     if (await isOptimalBucketDusty(data)) return _logRunExit('optimal bucket is dusty');
-    if (await isOptimalBucketRecentlyBankrupt(data))
+
+    const nowSec = await getChainTime();
+    if (await isOptimalBucketRecentlyBankrupt(data, nowSec))
       return _logRunExit('optimal bucket was recently bankrupt');
     if (await vault.isBucketDebtLocked(data.optimalBucket))
       return _logRunExit('optimal bucket debt is locked due to pending auction');
@@ -83,6 +88,21 @@ export async function arkRun(
     await rebalanceBuffer(data);
     await logFinalState(data);
   } catch (e) {
+    const ark = vault.getAddress();
+    if (e instanceof SubgraphUnavailableError) {
+      log.error(
+        { event: 'ark_run_aborted', ark, reason: 'subgraph unavailable', err: e },
+        `ark run aborted for ark ${ark}: subgraph unavailable`,
+      );
+      return;
+    }
+    if (e instanceof ChainTimeUnavailableError) {
+      log.error(
+        { event: 'ark_run_aborted', ark, reason: 'chain time unavailable', err: e },
+        `ark run aborted for ark ${ark}: chain time unavailable`,
+      );
+      return;
+    }
     if (!(e instanceof RunAbortError)) throw e;
   }
 }
@@ -196,7 +216,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       [op.to, op.amount],
       vault.getAddress(),
     );
-    return await handleTransaction(vault.moveFromBuffer(op.to as bigint, op.amount, gas), {
+    return await _executeMoveTransaction(vault.moveFromBuffer(op.to as bigint, op.amount, gas), {
       action: 'moveFromBuffer',
       to: op.to,
       amount: op.amount,
@@ -209,7 +229,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       [op.from, op.amount],
       vault.getAddress(),
     );
-    return await handleTransaction(vault.moveToBuffer(op.from, op.amount, gas), {
+    return await _executeMoveTransaction(vault.moveToBuffer(op.from, op.amount, gas), {
       action: 'moveToBuffer',
       from: op.from,
       amount: op.amount,
@@ -222,7 +242,7 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       [op.from, op.to, op.amount],
       vault.getAddress(),
     );
-    return await handleTransaction(vault.move(op.from, op.to, op.amount, gas), {
+    return await _executeMoveTransaction(vault.move(op.from, op.to, op.amount, gas), {
       action: 'move',
       from: op.from,
       to: op.to,
@@ -230,6 +250,15 @@ async function executeMoveOperation(op: MoveOperation): Promise<TransactionData 
       ark: vault.getAddress(),
     });
   }
+}
+
+async function _executeMoveTransaction(
+  ...args: Parameters<typeof handleTransaction>
+): Promise<TransactionData> {
+  const result = await handleTransaction(...args);
+  _moveStats.attempted++;
+  if (result.status) _moveStats.succeeded++;
+  return result;
 }
 
 async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
@@ -250,7 +279,7 @@ async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promi
     vaultAddress,
   );
 
-  await handleTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
+  await _executeMoveTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
     action: 'moveFromBuffer',
     to: targetBucket,
     amount: amount,
@@ -289,7 +318,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       [bucket, amountToMove],
       vaultAddress,
     );
-    const txData = await handleTransaction(vault.moveToBuffer(bucket, amountToMove, gas), {
+    const txData = await _executeMoveTransaction(vault.moveToBuffer(bucket, amountToMove, gas), {
       action: 'moveToBuffer',
       from: bucket,
       amount: amountToMove,
@@ -344,15 +373,16 @@ async function isOptimalBucketDusty(data: KeeperRunData): Promise<boolean> {
   return bucketLps !== 0n && bucketLps < dustThreshold;
 }
 
-async function isOptimalBucketRecentlyBankrupt(data: KeeperRunData): Promise<boolean> {
+async function isOptimalBucketRecentlyBankrupt(
+  data: KeeperRunData,
+  nowSec: bigint,
+): Promise<boolean> {
   const bankruptcyTimestamp = await vault.getBankruptcyTime(data.optimalBucket);
 
   if (_settings.minTimeSinceBankruptcy === 0n) return bankruptcyTimestamp > 0n;
+  if (bankruptcyTimestamp === 0n) return false;
 
-  return (
-    bankruptcyTimestamp > 0n &&
-    BigInt(Math.floor(Date.now() / 1000)) - bankruptcyTimestamp < _settings.minTimeSinceBankruptcy
-  );
+  return nowSec - bankruptcyTimestamp < _settings.minTimeSinceBankruptcy;
 }
 
 async function optimalBucketHasCollateral(data: KeeperRunData): Promise<boolean> {
@@ -478,12 +508,14 @@ export function initArkKeeper(
 }
 
 export function isArkHalted(address: Address): boolean {
-  return haltedArks.has(address);
+  return haltedArks.has(address.toLowerCase() as Address);
 }
 
 export function haltKeeper(address?: Address) {
-  const ark = address ?? vault?.getAddress?.();
-  if (!ark || haltedArks.has(ark)) return;
+  const raw = address ?? vault?.getAddress?.();
+  if (!raw) return;
+  const ark = raw.toLowerCase() as Address;
+  if (haltedArks.has(ark)) return;
 
   haltedArks.add(ark);
   log.warn(
@@ -510,16 +542,25 @@ function _logRunExit(reason: string): never {
 
 async function logFinalState(data: KeeperRunData): Promise<void> {
   const finalBufferTotal = await vault.getBufferTotal();
+  const { attempted, succeeded } = _moveStats;
+  const hasFailures = attempted > succeeded;
+  const event = hasFailures ? 'ark_run_partially_complete' : 'ark_run_complete';
+  const ark = vault.getAddress();
+  const message = hasFailures
+    ? `ark run partially complete for ark ${ark} (${succeeded}/${attempted} moves succeeded)`
+    : `ark run complete for ark ${ark}`;
 
   log.info(
     {
-      event: 'ark_run_complete',
-      ark: vault.getAddress(),
+      event,
+      ark,
       bufferTotal: finalBufferTotal,
       bufferTarget: data.bufferTarget,
       quoteTokenPrice: data.price,
       optimalBucket: data.optimalBucket,
+      movesAttempted: attempted,
+      movesSucceeded: succeeded,
     },
-    `ark run complete for ark ${vault.getAddress()}`,
+    message,
   );
 }

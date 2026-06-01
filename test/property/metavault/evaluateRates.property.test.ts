@@ -41,6 +41,7 @@ describe('evaluateRates property tests', () => {
               .filter(
                 (other) =>
                   other.vault.getAddress() !== ark.vault.getAddress() &&
+                  other.rate > ark.rate &&
                   other.rate * 100n >= ark.rate * 110n,
               )
               .map((other) => other.vault.getAddress());

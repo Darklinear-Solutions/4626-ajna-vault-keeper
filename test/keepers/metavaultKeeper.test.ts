@@ -5,9 +5,17 @@ import {
   _rebalanceBuffer,
   _reallocateForRates,
   _buildFinalAllocations,
+  ACCRUAL_PAD_BPS,
   type ArkAllocation,
   type BufferAllocation,
 } from '../../src/keepers/metavaultKeeper';
+
+// Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: never exceeds the planned
+// decrease, otherwise the submitted target would invert into a supply branch at Euler.
+const accrualPad = (realInitialAssets: bigint, decrease: bigint) => {
+  const bps = (realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
+  return bps < decrease ? bps : decrease;
+};
 import { evaluateRates, type ArkEvaluation } from '../../src/metavault/utils/evaluateRates';
 import { type MarketAllocation } from '../../src/metavault/metavault';
 import { type createVault } from '../../src/ark/vault';
@@ -50,9 +58,10 @@ type Vault = ReturnType<typeof createVault>;
 const stubVault = {} as Vault;
 
 function makeArk(overrides: Partial<ArkAllocation> & { id: Address }): ArkAllocation {
+  const assets = overrides.assets ?? 0n;
+  const initialAssets = overrides.initialAssets ?? assets;
+  const realInitialAssets = overrides.realInitialAssets ?? initialAssets;
   return {
-    assets: 0n,
-    initialAssets: 0n,
     vault: stubVault,
     min: 5,
     max: 20,
@@ -60,16 +69,23 @@ function makeArk(overrides: Partial<ArkAllocation> & { id: Address }): ArkAlloca
     minMoveAmount: 1_000_001n,
     hasBadDebt: false,
     ...overrides,
+    assets,
+    initialAssets,
+    realInitialAssets,
   };
 }
 
 function makeBuffer(overrides?: Partial<BufferAllocation>): BufferAllocation {
+  const assets = overrides?.assets ?? 400n * S;
+  const initialAssets = overrides?.initialAssets ?? assets;
+  const realInitialAssets = overrides?.realInitialAssets ?? initialAssets;
   return {
     id: ADDR_BUF,
-    assets: 400n * S,
-    initialAssets: 400n * S,
     allocation: 40,
     ...overrides,
+    assets,
+    initialAssets,
+    realInitialAssets,
   };
 }
 
@@ -706,7 +722,7 @@ describe('_buildFinalAllocations', () => {
     const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
 
     expect(result[0]!.id).toBe(ADDR_A); // decreasing first
-    expect(result[0]!.assets).toBe(200n * S);
+    expect(result[0]!.assets).toBe(200n * S + accrualPad(300n * S, 100n * S));
     expect(result[1]!.id).toBe(ADDR_B); // increasing last
   });
 
@@ -754,7 +770,7 @@ describe('_buildFinalAllocations', () => {
 
     expect(result.length).toBe(2);
     expect(result[0]!.id).toBe(ADDR_BUF); // decreasing
-    expect(result[0]!.assets).toBe(350n * S);
+    expect(result[0]!.assets).toBe(350n * S + accrualPad(500n * S, 150n * S));
     expect(result[1]!.id).toBe(ADDR_B); // increasing (maxUint256)
     expect(result[1]!.assets).toBe(maxUint256);
   });
@@ -793,8 +809,114 @@ describe('_buildFinalAllocations', () => {
     const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
 
     expect(result[0]!.id).toBe(ADDR_A);
-    expect(result[0]!.assets).toBe(350n * S);
+    expect(result[0]!.assets).toBe(350n * S + accrualPad(500n * S, 150n * S));
     expect(result[1]!.id).toBe(ADDR_BUF);
     expect(result[1]!.assets).toBe(maxUint256);
+  });
+
+  // Regression: when an ARK's real Euler supply exceeds its capped initialAssets (illiquid pool),
+  // the submitted target must anchor to realInitialAssets, not the working assets value. Sending
+  // the raw `assets` would cause Euler to attempt withdrawing the entire illiquid portion.
+  it('anchors decreasing targets to realInitialAssets when an ARK is pool-capped', () => {
+    const arks = [
+      makeArk({
+        id: ADDR_A,
+        assets: 80n * S,
+        initialAssets: 100n * S, // capped liquid balance
+        realInitialAssets: 1000n * S, // real Euler supply
+      }),
+    ];
+    const buffer = makeBuffer({
+      assets: 420n * S,
+      initialAssets: 400n * S,
+      realInitialAssets: 400n * S,
+    });
+
+    const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
+
+    expect(result).toHaveLength(2);
+    // realInit (1000) − decrease (20) + clamped accrualPad(1000, 20)
+    expect(result[0]).toEqual({ id: ADDR_A, assets: 980n * S + accrualPad(1000n * S, 20n * S) });
+    expect(result[1]).toEqual({ id: ADDR_BUF, assets: maxUint256 });
+  });
+
+  it('anchors increasing targets to realInitialAssets when paired with a pool-capped decrease', () => {
+    const arks = [
+      makeArk({
+        id: ADDR_A,
+        assets: 80n * S,
+        initialAssets: 100n * S,
+        realInitialAssets: 1000n * S, // illiquid
+      }),
+      makeArk({
+        id: ADDR_B,
+        assets: 240n * S,
+        initialAssets: 220n * S,
+        realInitialAssets: 220n * S, // fully liquid
+      }),
+    ];
+    const buffer = makeBuffer({
+      assets: 400n * S,
+      initialAssets: 400n * S,
+      realInitialAssets: 400n * S,
+    });
+
+    const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
+
+    // Decreasing ARK_A: 1000 − 20 + clamped accrualPad(1000, 20) for accrual safety.
+    // Increasing ARK_B as last entry → maxUint256.
+    expect(result).toEqual([
+      { id: ADDR_A, assets: 980n * S + accrualPad(1000n * S, 20n * S) },
+      { id: ADDR_B, assets: maxUint256 },
+    ]);
+  });
+
+  // Regression: realInitialAssets can shrink between snapshot and refresh (a co-allocator moved
+  // capital out, share dilution, strategy disabled). Without the guard, the subtraction in
+  // finalTarget throws an uncaught BigInt underflow and bypasses RunAbortError, leaving any
+  // already-executed drains stranded.
+  it('returns an abort string when refreshed realInitialAssets is below the planned decrease', () => {
+    const arks = [
+      makeArk({
+        id: ADDR_A,
+        assets: 80n * S,
+        initialAssets: 200n * S, // planner planned to decrease A by 120*S
+        realInitialAssets: 50n * S, // refresh showed less than the planned decrease
+      }),
+    ];
+    const buffer = makeBuffer({
+      assets: 520n * S,
+      initialAssets: 400n * S,
+      realInitialAssets: 400n * S,
+    });
+
+    const result = _buildFinalAllocations(arks, buffer);
+
+    expect(typeof result).toBe('string');
+    expect(result).toContain('below planned decrease');
+    expect(result).toContain(ADDR_A);
+  });
+
+  it('preserves the totalWithdrawn = totalSupplied invariant when targets shift to real domain', () => {
+    // Use realInitialAssets ≠ initialAssets for the decreasing ARK to ensure the invariant check
+    // operates in the planner's domain (deltas) rather than the real-domain finalTargets.
+    const arks = [
+      makeArk({
+        id: ADDR_A,
+        assets: 80n * S,
+        initialAssets: 100n * S,
+        realInitialAssets: 1000n * S,
+      }),
+    ];
+    const buffer = makeBuffer({
+      assets: 420n * S,
+      initialAssets: 400n * S,
+      realInitialAssets: 400n * S,
+    });
+
+    // delta_A = −20, delta_buffer = +20 → invariant holds even though A's finalTarget jumps to 980.
+    expect(_buildFinalAllocations(arks, buffer)).not.toEqual(
+      expect.stringContaining('inconsistent reallocation'),
+    );
   });
 });

@@ -2,6 +2,7 @@ import { gql, request } from 'graphql-request';
 import { env } from '../utils/env.ts';
 import { config } from '../utils/config.ts';
 import { log } from '../utils/logger.ts';
+import { getChainTime } from '../utils/chainTime.ts';
 import type { Address } from 'viem';
 
 type GetUnsettledAuctionsResponse = {
@@ -19,13 +20,17 @@ type VaultLike = {
   getAuctionStatus: (borrower: Address) => Promise<readonly [bigint, bigint, bigint, ...unknown[]]>;
 };
 
+export class SubgraphUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super('subgraph query failed in fail-closed mode', { cause });
+    this.name = 'SubgraphUnavailableError';
+  }
+}
+
 export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): Promise<boolean> {
-  const unfilteredAuctions = await _getUnsettledAuctions(vault);
-  if (unfilteredAuctions === 'error') return true;
-  const auctionsBeforeCutoff = _filterAuctions(
-    unfilteredAuctions as GetUnsettledAuctionsResponse,
-    maxAuctionAge,
-  );
+  const auctions = await _getUnsettledAuctions(vault);
+  const nowSec = await getChainTime();
+  const auctionsBeforeCutoff = _filterAuctions(auctions, nowSec, maxAuctionAge);
 
   for (let i = 0; i < auctionsBeforeCutoff.length; i++) {
     const [kickTime, collateralRemaining, debtRemaining] = await vault.getAuctionStatus(
@@ -40,7 +45,7 @@ export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): 
 
 export async function _getUnsettledAuctions(
   vault: VaultLike,
-): Promise<GetUnsettledAuctionsResponse | string> {
+): Promise<GetUnsettledAuctionsResponse> {
   try {
     const poolAddress = (await vault.getPoolAddress()).toLowerCase();
     const subgraphUrl = env.SUBGRAPH_URL;
@@ -61,16 +66,32 @@ export async function _getUnsettledAuctions(
     return result;
   } catch (err) {
     log.error(
-      { event: 'subgraph_query_failed', url: env.SUBGRAPH_URL, ark: vault.getAddress(), err },
+      {
+        event: 'subgraph_query_failed',
+        subgraphOrigin: safeOrigin(env.SUBGRAPH_URL),
+        ark: vault.getAddress(),
+        err,
+      },
       'subgraph query failed',
     );
 
-    return config.keeper.exitOnSubgraphFailure ? 'error' : { liquidationAuctions: [] };
+    if (config.keeper.exitOnSubgraphFailure) throw new SubgraphUnavailableError(err);
+    return { liquidationAuctions: [] };
+  }
+}
+
+function safeOrigin(rawUrl: string | undefined): string | undefined {
+  if (!rawUrl) return undefined;
+  try {
+    return new URL(rawUrl).origin;
+  } catch {
+    return undefined;
   }
 }
 
 export function _filterAuctions(
   response: GetUnsettledAuctionsResponse,
+  nowSec: bigint,
   maxAuctionAge?: number,
 ): LiquidationAuction[] {
   const unsettledAuctions = response.liquidationAuctions;
@@ -78,13 +99,14 @@ export function _filterAuctions(
 
   if (maxAge === 0) return unsettledAuctions;
 
-  let auctionsBeforeCutoff: LiquidationAuction[] = [];
+  const maxAgeBig = BigInt(maxAge);
+  const auctionsBeforeCutoff: LiquidationAuction[] = [];
 
   for (let i = 0; i < unsettledAuctions.length; i++) {
-    const kickTime = Number(unsettledAuctions[i]!.kickTime);
-    const auctionAge = Math.floor(Date.now() / 1000) - kickTime;
+    const kickTime = BigInt(unsettledAuctions[i]!.kickTime);
+    const auctionAge = nowSec - kickTime;
 
-    if (auctionAge > maxAge) {
+    if (auctionAge > maxAgeBig) {
       auctionsBeforeCutoff.push(unsettledAuctions[i]!);
     }
   }

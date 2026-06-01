@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import { readFileSync } from 'fs';
 
 const REQUIRED = ['RPC_URL', 'SUBGRAPH_URL'] as const;

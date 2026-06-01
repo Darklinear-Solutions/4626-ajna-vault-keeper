@@ -30,10 +30,19 @@ import {
   _buildFinalAllocations,
   _rebalanceBuffer,
   _reallocateForRates,
+  ACCRUAL_PAD_BPS,
   type Ark,
   type ArkAllocation,
   type BufferAllocation,
 } from '../../../src/keepers/metavaultKeeper';
+
+// Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: the pad is bounded by the
+// planned decrease so the submitted target never exceeds realInitialAssets (which would invert
+// the entry into a supply branch and trip Euler's totalWithdrawn == totalSupplied invariant).
+const accrualPad = (realInitialAssets: bigint, decrease: bigint) => {
+  const bps = (realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
+  return bps < decrease ? bps : decrease;
+};
 import { evaluateRates } from '../../../src/metavault/utils/evaluateRates';
 import { type Address, maxUint256 } from 'viem';
 import { type createVault } from '../../../src/ark/vault';
@@ -111,6 +120,7 @@ const rebalanceScenarioArb = fc
             id: ADDRESSES[0],
             assets: assetsA,
             initialAssets: assetsA,
+            realInitialAssets: assetsA,
             vault: makeVault(ADDRESSES[0]),
             min: mins[0],
             max: maxA,
@@ -122,6 +132,7 @@ const rebalanceScenarioArb = fc
             id: ADDRESSES[1],
             assets: assetsB,
             initialAssets: assetsB,
+            realInitialAssets: assetsB,
             vault: makeVault(ADDRESSES[1]),
             min: mins[1],
             max: maxB,
@@ -133,6 +144,7 @@ const rebalanceScenarioArb = fc
             id: ADDRESSES[2],
             assets: assetsC,
             initialAssets: assetsC,
+            realInitialAssets: assetsC,
             vault: makeVault(ADDRESSES[2]),
             min: mins[2],
             max: maxC,
@@ -146,6 +158,7 @@ const rebalanceScenarioArb = fc
           id: BUFFER_ADDRESS,
           assets: bufferAssets,
           initialAssets: bufferAssets,
+          realInitialAssets: bufferAssets,
           allocation: bufferAllocation,
         };
 
@@ -203,6 +216,7 @@ const rateScenarioArb = fc
             id: ADDRESSES[0],
             assets: (totalAssets * BigInt(shares[0])) / 100n,
             initialAssets: (totalAssets * BigInt(shares[0])) / 100n,
+            realInitialAssets: (totalAssets * BigInt(shares[0])) / 100n,
             vault: makeVault(ADDRESSES[0]),
             min: mins[0],
             max: maxA,
@@ -214,6 +228,7 @@ const rateScenarioArb = fc
             id: ADDRESSES[1],
             assets: (totalAssets * BigInt(shares[1])) / 100n,
             initialAssets: (totalAssets * BigInt(shares[1])) / 100n,
+            realInitialAssets: (totalAssets * BigInt(shares[1])) / 100n,
             vault: makeVault(ADDRESSES[1]),
             min: mins[1],
             max: maxB,
@@ -225,6 +240,7 @@ const rateScenarioArb = fc
             id: ADDRESSES[2],
             assets: (totalAssets * BigInt(shares[2])) / 100n,
             initialAssets: (totalAssets * BigInt(shares[2])) / 100n,
+            realInitialAssets: (totalAssets * BigInt(shares[2])) / 100n,
             vault: makeVault(ADDRESSES[2]),
             min: mins[2],
             max: maxC,
@@ -340,11 +356,13 @@ describe('metavault planner property tests', () => {
             id: ark.id,
             assets: ark.assets,
             initialAssets: ark.initialAssets,
+            realInitialAssets: ark.realInitialAssets,
           })),
           {
             id: buffer.id,
             assets: buffer.assets,
             initialAssets: buffer.initialAssets,
+            realInitialAssets: buffer.realInitialAssets,
           },
         ];
         const decreasing = all.filter((entry) => entry.assets < entry.initialAssets);
@@ -358,17 +376,94 @@ describe('metavault planner property tests', () => {
         expect(allocations).toHaveLength(decreasing.length + increasing.length);
 
         for (let i = 0; i < decreasing.length; i++) {
-          expect(allocations[i]).toEqual({
-            id: decreasing[i]!.id,
-            assets: decreasing[i]!.assets,
-          });
+          const entry = decreasing[i]!;
+          const delta = entry.assets - entry.initialAssets;
+          const target =
+            entry.realInitialAssets + delta + accrualPad(entry.realInitialAssets, -delta);
+          expect(allocations[i]).toEqual({ id: entry.id, assets: target });
+          // Semantic invariant: the submitted target must remain ≤ realInitialAssets so Euler
+          // takes the withdraw branch (target > real would supply, breaking the invariant).
+          expect(allocations[i]!.assets).toBeLessThanOrEqual(entry.realInitialAssets);
         }
 
         for (let i = 0; i < Math.max(increasing.length - 1, 0); i++) {
-          expect(allocations[decreasing.length + i]).toEqual({
-            id: increasing[i]!.id,
-            assets: increasing[i]!.assets,
+          const entry = increasing[i]!;
+          const delta = entry.assets - entry.initialAssets;
+          const target = entry.realInitialAssets + delta;
+          expect(allocations[decreasing.length + i]).toEqual({ id: entry.id, assets: target });
+        }
+
+        if (increasing.length > 0) {
+          expect(allocations[allocations.length - 1]).toEqual({
+            id: increasing[increasing.length - 1]!.id,
+            assets: maxUint256,
           });
+        }
+      }),
+      { numRuns: 200 },
+    );
+  });
+
+  it('buildFinalAllocations anchors padded decreasing targets to realInitialAssets when pool-capped', () => {
+    fc.assert(
+      fc.property(rebalanceScenarioArb, ({ arks, buffer, totalAssets }) => {
+        // Simulate pool-capped ARKs: real Euler supply is several multiples of the planner's
+        // capped initialAssets. The padded target on every decreasing entry must anchor to
+        // realInitialAssets (not the planner's working assets), or Euler would attempt to
+        // withdraw the entire illiquid portion at reallocate time.
+        for (const ark of arks) {
+          ark.realInitialAssets = ark.initialAssets * 3n;
+        }
+        buffer.realInitialAssets = buffer.initialAssets * 3n;
+
+        _rebalanceBuffer(arks, buffer, totalAssets);
+
+        const result = _buildFinalAllocations(arks, buffer);
+        expect(Array.isArray(result)).toBe(true);
+
+        const allocations = result as Array<{ id: Address; assets: bigint }>;
+        const all = [
+          ...arks.map((ark) => ({
+            id: ark.id,
+            assets: ark.assets,
+            initialAssets: ark.initialAssets,
+            realInitialAssets: ark.realInitialAssets,
+          })),
+          {
+            id: buffer.id,
+            assets: buffer.assets,
+            initialAssets: buffer.initialAssets,
+            realInitialAssets: buffer.realInitialAssets,
+          },
+        ];
+        const decreasing = all.filter((entry) => entry.assets < entry.initialAssets);
+        const increasing = all.filter((entry) => entry.assets > entry.initialAssets);
+
+        if (decreasing.length === 0 && increasing.length === 0) {
+          expect(allocations).toEqual([]);
+          return;
+        }
+
+        for (let i = 0; i < decreasing.length; i++) {
+          const entry = decreasing[i]!;
+          const delta = entry.assets - entry.initialAssets;
+          const expectedTarget =
+            entry.realInitialAssets + delta + accrualPad(entry.realInitialAssets, -delta);
+          expect(allocations[i]).toEqual({ id: entry.id, assets: expectedTarget });
+          // Same invariant: the padded decreasing target must never exceed realInitialAssets,
+          // even when realInitialAssets is much larger than the planner's capped initialAssets.
+          expect(allocations[i]!.assets).toBeLessThanOrEqual(entry.realInitialAssets);
+        }
+
+        if (increasing.length > 1) {
+          for (let i = 0; i < increasing.length - 1; i++) {
+            const entry = increasing[i]!;
+            const delta = entry.assets - entry.initialAssets;
+            expect(allocations[decreasing.length + i]).toEqual({
+              id: entry.id,
+              assets: entry.realInitialAssets + delta,
+            });
+          }
         }
 
         if (increasing.length > 0) {
