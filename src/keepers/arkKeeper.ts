@@ -2,7 +2,7 @@ import { type ResolvedArkSettings } from '../utils/config.ts';
 import { config } from '../utils/config.ts';
 import { log } from '../utils/logger.ts';
 import { toWad } from '../utils/decimalConversion.ts';
-import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
+import { poolBalanceCapWad } from '../ajna/utils/poolBalanceCap.ts';
 import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction.ts';
 import { getPrice } from '../oracle/price.ts';
 import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
@@ -125,7 +125,7 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
     if (!drainTx.status) _logRunExit(`drain failed for ark ${vaultAddress}`);
 
     const bucketValue = await vault.lpToValue(bucket);
-    const amountToMove = await poolBalanceCap(bucketValue, vault);
+    const amountToMove = await poolBalanceCapWad(bucketValue, vault);
     if (await shouldSkipBucket(bucket, amountToMove, data)) continue;
 
     const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data, i);
@@ -157,7 +157,7 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
     const deficit = -difference;
     if (deficit <= _settings.bufferPadding + data.minAmount) return;
 
-    const amount = await poolBalanceCap(-difference - _settings.bufferPadding, vault);
+    const amount = await poolBalanceCapWad(-difference - _settings.bufferPadding, vault);
     await fillBufferDeficit(amount, data);
   }
 }
@@ -307,7 +307,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
 
     if (bucketValue < data.minAmount) continue;
 
-    const amountToMove = await poolBalanceCap(
+    const amountToMove = await poolBalanceCapWad(
       bucketValue >= remaining ? remaining : bucketValue,
       vault,
     );

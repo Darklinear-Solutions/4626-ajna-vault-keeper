@@ -3,12 +3,15 @@ import type { Address } from 'viem';
 
 const ARK = '0x00000000000000000000000000000000000000a1' as Address;
 const POOL = '0x00000000000000000000000000000000000000c3' as Address;
+const QUOTE = '0x00000000000000000000000000000000000000d4' as Address;
 const TX_HASH =
   '0x1111111111111111111111111111111111111111111111111111111111111111' as `0x${string}`;
+const WAD = 10n ** 18n;
+const SIX_DECIMAL_TOKEN = 10n ** 6n;
 
-function buildVault(address: Address) {
+function buildVault() {
   return {
-    getAddress: () => address,
+    getAddress: () => ARK,
     isPaused: vi.fn().mockResolvedValue(false),
     getPoolAddress: vi.fn().mockResolvedValue(POOL),
     updateInterest: vi.fn().mockResolvedValue(TX_HASH),
@@ -16,7 +19,7 @@ function buildVault(address: Address) {
     move: vi.fn().mockResolvedValue(TX_HASH),
     moveToBuffer: vi.fn().mockResolvedValue(TX_HASH),
     moveFromBuffer: vi.fn().mockResolvedValue(TX_HASH),
-    getBuckets: vi.fn().mockResolvedValue([5n]),
+    getBuckets: vi.fn().mockResolvedValue([5n, 6n]),
     getBufferTotal: vi.fn().mockResolvedValue(0n),
     getLup: vi.fn().mockResolvedValue(110n),
     getHtp: vi.fn().mockResolvedValue(90n),
@@ -26,52 +29,47 @@ function buildVault(address: Address) {
       return 10n;
     }),
     getIndexToPrice: vi.fn().mockImplementation(async (index: bigint) => {
-      if (index === 11n) return 110n;
-      if (index === 9n) return 90n;
-      return 100n;
+      if (index === 10n) return 100n;
+      return 80n;
     }),
     getBufferRatio: vi.fn().mockResolvedValue(0n),
     getTotalAssets: vi.fn().mockResolvedValue(0n),
-    getAssetDecimals: vi.fn().mockResolvedValue(18),
+    getAssetDecimals: vi.fn().mockResolvedValue(6),
     getMinBucketIndex: vi.fn().mockResolvedValue(0n),
     getBucketLps: vi.fn().mockResolvedValue(0n),
-    getDustThreshold: vi.fn().mockResolvedValue(0n),
+    getDustThreshold: vi.fn().mockResolvedValue(1n),
     getBankruptcyTime: vi.fn().mockResolvedValue(0n),
     isBucketDebtLocked: vi.fn().mockResolvedValue(false),
     getBucketInfo: vi.fn().mockResolvedValue([0n, 0n, 0n]),
-    lpToValue: vi.fn().mockResolvedValue(0n),
+    lpToValue: vi.fn().mockResolvedValue(100n * WAD),
   };
 }
 
 afterEach(() => {
   vi.resetModules();
+  vi.doUnmock('../../src/utils/config.ts');
+  vi.doUnmock('../../src/utils/client.ts');
   vi.doUnmock('../../src/ark/vault.ts');
   vi.doUnmock('../../src/subgraph/poolHealth.ts');
   vi.doUnmock('../../src/utils/transaction.ts');
   vi.doUnmock('../../src/oracle/price.ts');
-  vi.doUnmock('../../src/ajna/utils/poolBalanceCap.ts');
-  vi.doUnmock('../../src/utils/decimalConversion.ts');
   vi.doUnmock('../../src/utils/logger.ts');
   vi.doUnmock('../../src/utils/chainTime.ts');
 });
 
-describe('arkRun aborts on nested transaction failure', () => {
-  it('aborts the run when a drain inside rebalanceBuckets fails', async () => {
-    const vault = buildVault(ARK);
-    const log = { error: vi.fn(), info: vi.fn(), warn: vi.fn() };
-
-    let drainCount = 0;
+describe('arkRun pool balance cap units', () => {
+  it('scales pool native token balance to WAD before capping ARK bucket moves', async () => {
+    const vault = buildVault();
+    const readContract = vi.fn().mockResolvedValue(1_000n * SIX_DECIMAL_TOKEN);
     const handleTransaction = vi.fn(async (_tx: unknown, ctx?: { action?: string }) => {
-      if (ctx?.action === 'drain') {
-        drainCount += 1;
-        // Drain sequence with one bucket configured: 1) _getKeeperData drains the
-        // initial bucket, 2) arkRun drains the optimal bucket, 3) rebalanceBuckets
-        // drains again. Failing #3 forces the abort to come from a nested helper.
-        if (drainCount === 3) return { status: false, assets: 0n };
-      }
+      if (ctx?.action === 'move') return { status: true, assets: 100n * WAD };
       return { status: true, assets: 0n };
     });
 
+    vi.doMock('../../src/utils/config.ts', () => ({
+      config: { quoteTokenAddress: QUOTE, metavaultAddress: undefined },
+    }));
+    vi.doMock('../../src/utils/client.ts', () => ({ client: { readContract } }));
     vi.doMock('../../src/ark/vault.ts', () => ({
       createVault: vi.fn(() => vault),
     }));
@@ -86,40 +84,42 @@ describe('arkRun aborts on nested transaction failure', () => {
     vi.doMock('../../src/oracle/price.ts', () => ({
       getPrice: vi.fn().mockResolvedValue(100n),
     }));
-    vi.doMock('../../src/ajna/utils/poolBalanceCap.ts', () => ({
-      poolBalanceCapWad: vi.fn(async (amount: bigint) => amount),
+    vi.doMock('../../src/utils/logger.ts', () => ({
+      log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
     }));
-    vi.doMock('../../src/utils/decimalConversion.ts', () => ({
-      toWad: vi.fn((amount: bigint) => amount),
-    }));
-    vi.doMock('../../src/utils/logger.ts', () => ({ log }));
     vi.doMock('../../src/utils/chainTime.ts', () => ({
       getChainTime: vi.fn().mockResolvedValue(0n),
       ChainTimeUnavailableError: class extends Error {},
     }));
 
-    const { arkRun } = await import('../../src/keepers/arkKeeper.ts');
+    const previousIntegrationTest = process.env.INTEGRATION_TEST;
+    delete process.env.INTEGRATION_TEST;
+    try {
+      const { arkRun } = await import('../../src/keepers/arkKeeper.ts');
 
-    const settings = {
-      optimalBucketDiff: 0n,
-      bufferPadding: 0n,
-      minMoveAmount: 1n,
-      minTimeSinceBankruptcy: 0n,
-      maxAuctionAge: 0,
-    };
+      await arkRun(ARK, ARK, {
+        optimalBucketDiff: 0n,
+        bufferPadding: 0n,
+        minMoveAmount: 1_000_001n,
+        minTimeSinceBankruptcy: 0n,
+        maxAuctionAge: 0,
+      });
+    } finally {
+      if (previousIntegrationTest === undefined) {
+        delete process.env.INTEGRATION_TEST;
+      } else {
+        process.env.INTEGRATION_TEST = previousIntegrationTest;
+      }
+    }
 
-    await arkRun(ARK, ARK, settings);
-
-    expect(log.error).toHaveBeenCalledWith(
+    expect(readContract).toHaveBeenCalledWith(
       expect.objectContaining({
-        event: 'ark_run_aborted',
-        ark: ARK,
-        reason: expect.stringContaining('drain failed'),
+        address: QUOTE,
+        functionName: 'balanceOf',
+        args: [POOL],
       }),
-      expect.stringContaining(ARK),
     );
-    expect(vault.move).not.toHaveBeenCalled();
-    expect(vault.moveToBuffer).not.toHaveBeenCalled();
-    expect(vault.moveFromBuffer).not.toHaveBeenCalled();
+    expect(vault.move).toHaveBeenCalledWith(5n, 10n, 100n * WAD, 1n);
+    expect(vault.move).toHaveBeenCalledWith(6n, 10n, 100n * WAD, 1n);
   });
 });

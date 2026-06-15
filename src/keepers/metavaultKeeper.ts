@@ -8,7 +8,7 @@ import {
   reallocate,
   type MarketAllocation,
 } from '../metavault/metavault.ts';
-import { poolBalanceCap } from '../ajna/utils/poolBalanceCap.ts';
+import { poolBalanceCapAsset } from '../ajna/utils/poolBalanceCap.ts';
 import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
 import { ChainTimeUnavailableError } from '../utils/chainTime.ts';
 import { log } from '../utils/logger.ts';
@@ -146,7 +146,7 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
       vault.getBorrowFeeRate() as Promise<bigint>,
       poolHasBadDebt(vault, settings.maxAuctionAge),
     ]);
-    const cappedBalance = await poolBalanceCap(balance, vault);
+    const cappedBalance = await poolBalanceCapAsset(balance, vault);
 
     allocations.push({
       id: arkConfig.address,

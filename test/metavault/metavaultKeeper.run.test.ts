@@ -130,9 +130,11 @@ async function setupMetavaultRunTest({
   const selectBuckets = vi.fn().mockResolvedValue(bucketPlan);
   const handleTransaction = vi.fn().mockResolvedValue({ status: true });
   const getGasWithBuffer = vi.fn().mockResolvedValue(77n);
-  const poolBalanceCap = vi.fn(async (amount: bigint, vault: { getAddress: () => Address }) => {
-    return poolBalanceCaps[vault.getAddress()] ?? amount;
-  });
+  const poolBalanceCapAsset = vi.fn(
+    async (amount: bigint, vault: { getAddress: () => Address }) => {
+      return poolBalanceCaps[vault.getAddress()] ?? amount;
+    },
+  );
   const log = {
     error: vi.fn(),
     info: vi.fn(),
@@ -197,7 +199,7 @@ async function setupMetavaultRunTest({
     getGasWithBuffer,
   }));
   vi.doMock('../../src/ajna/utils/poolBalanceCap.ts', () => ({
-    poolBalanceCap,
+    poolBalanceCapAsset,
   }));
   vi.doMock('../../src/utils/logger.ts', () => ({ log }));
 

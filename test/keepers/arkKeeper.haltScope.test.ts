@@ -74,7 +74,7 @@ describe('ark halt scoping', () => {
       getPrice: vi.fn().mockResolvedValue(100n),
     }));
     vi.doMock('../../src/ajna/utils/poolBalanceCap.ts', () => ({
-      poolBalanceCap: vi.fn(async (amount: bigint) => amount),
+      poolBalanceCapWad: vi.fn(async (amount: bigint) => amount),
     }));
     vi.doMock('../../src/utils/decimalConversion.ts', () => ({
       toWad: vi.fn((amount: bigint) => amount),
@@ -126,7 +126,7 @@ describe('ark halt scoping', () => {
       handleTransaction: vi.fn(),
     }));
     vi.doMock('../../src/oracle/price.ts', () => ({ getPrice: vi.fn() }));
-    vi.doMock('../../src/ajna/utils/poolBalanceCap.ts', () => ({ poolBalanceCap: vi.fn() }));
+    vi.doMock('../../src/ajna/utils/poolBalanceCap.ts', () => ({ poolBalanceCapWad: vi.fn() }));
     vi.doMock('../../src/utils/decimalConversion.ts', () => ({ toWad: vi.fn() }));
     vi.doMock('../../src/utils/logger.ts', () => ({
       log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
