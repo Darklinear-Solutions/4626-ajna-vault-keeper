@@ -96,12 +96,17 @@ export async function metavaultRun() {
       );
     }
 
-    await _executeMoveToBufferCalls(arkAllocations);
+    const preparedArks = await _executeMoveToBufferCalls(arkAllocations);
 
     await _refreshRealInitialAssets(arkAllocations, bufferAllocation);
 
     const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
     if (typeof allocations === 'string') return _logRunExit(allocations);
+
+    const unpreparedArk = _findUnpreparedArkWithdrawal(allocations, arkAllocations, preparedArks);
+    if (unpreparedArk) {
+      return _logRunExit(`ark ${unpreparedArk} has a withdrawal target without a prepared buffer`);
+    }
 
     const reallocateTx = await handleTransaction(reallocate(allocations, config.defaultGas), {
       action: 'reallocate',
@@ -308,14 +313,18 @@ export function _reallocateForRates(
 
 // ============= MoveToBuffer Execution =============
 
-async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
+async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<Set<Address>> {
   const plans: Array<{ ark: ArkAllocation; plan: BucketMove[] }> = [];
+  const preparedArks = new Set<Address>();
 
   for (const ark of arks) {
     if (ark.assets >= ark.initialAssets) continue;
 
+    const decrease = ark.initialAssets - ark.assets;
+    if (_effectiveWithdrawal(ark.realInitialAssets, decrease) === 0n) continue;
+
     const assetDecimals = (await ark.vault.getAssetDecimals()) as number;
-    const amountToMoveWad = toWad(ark.initialAssets - ark.assets, assetDecimals);
+    const amountToMoveWad = toWad(decrease, assetDecimals);
     const bucketPlan = await selectBuckets(ark.vault, amountToMoveWad);
 
     const plannedCoverage = bucketPlan.reduce((sum, p) => sum + p.amount, 0n);
@@ -347,7 +356,10 @@ async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<void> {
 
       if (!moveTx.status) return _logRunExit(`moveToBuffer failed for ark ${ark.id}`);
     }
+    preparedArks.add(ark.id);
   }
+
+  return preparedArks;
 }
 
 async function _refreshRealInitialAssets(
@@ -436,34 +448,114 @@ export function _buildFinalAllocations(
     const base = a.realInitialAssets + a.delta;
     let pad = 0n;
     if (a.delta < 0n) {
-      const bpsPad = (a.realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
       const decrease = -a.delta;
-      pad = bpsPad < decrease ? bpsPad : decrease;
+      pad = _accrualPad(a.realInitialAssets, decrease);
     }
-    return { id: a.id, delta: a.delta, finalTarget: base + pad };
+    const finalTarget = base + pad;
+    const effectiveWithdrawn =
+      a.delta < 0n && a.realInitialAssets > finalTarget ? a.realInitialAssets - finalTarget : 0n;
+    return {
+      id: a.id,
+      delta: a.delta,
+      realInitialAssets: a.realInitialAssets,
+      finalTarget,
+      effectiveWithdrawn,
+    };
   });
 
-  const decreasing = withTargets.filter((a) => a.delta < 0n);
+  const decreasing = withTargets.filter((a) => a.delta < 0n && a.effectiveWithdrawn > 0n);
   const increasing = withTargets.filter((a) => a.delta > 0n);
 
   if (decreasing.length === 0 && increasing.length === 0) return [];
 
-  const totalWithdrawn = decreasing.reduce((sum, a) => sum + -a.delta, 0n);
+  const totalWithdrawn = withTargets.reduce((sum, a) => (a.delta < 0n ? sum + -a.delta : sum), 0n);
   const totalSupplied = increasing.reduce((sum, a) => sum + a.delta, 0n);
   if (totalWithdrawn !== totalSupplied) {
     return `inconsistent reallocation: totalWithdrawn (${totalWithdrawn}) != totalSupplied (${totalSupplied})`;
   }
 
-  const ordered: MarketAllocation[] = [
-    ...decreasing.map((a) => ({ id: a.id, assets: a.finalTarget })),
-    ...increasing.slice(0, -1).map((a) => ({ id: a.id, assets: a.finalTarget })),
-  ];
+  const effectiveWithdrawn = decreasing.reduce((sum, a) => sum + a.effectiveWithdrawn, 0n);
+  if (effectiveWithdrawn === 0n) {
+    return `accrual pad absorbs planned withdrawals (${totalWithdrawn})`;
+  }
+
+  let remainingSupply = effectiveWithdrawn;
+  const ordered: MarketAllocation[] = decreasing.map((a) => ({ id: a.id, assets: a.finalTarget }));
+
+  for (const a of increasing.slice(0, -1)) {
+    if (remainingSupply === 0n) break;
+    const supply = a.delta < remainingSupply ? a.delta : remainingSupply;
+    ordered.push({ id: a.id, assets: a.realInitialAssets + supply });
+    remainingSupply -= supply;
+  }
 
   if (increasing.length > 0) {
     ordered.push({ id: increasing[increasing.length - 1]!.id, assets: maxUint256 });
   }
 
+  const simulated = _simulateEulerReallocationAccounting(ordered, all);
+  if (simulated.totalWithdrawn !== simulated.totalSupplied) {
+    return `inconsistent reallocation: totalWithdrawn (${simulated.totalWithdrawn}) != totalSupplied (${simulated.totalSupplied})`;
+  }
+
   return ordered;
+}
+
+function _simulateEulerReallocationAccounting(
+  allocations: MarketAllocation[],
+  balances: Array<{ id: Address; realInitialAssets: bigint }>,
+): { totalWithdrawn: bigint; totalSupplied: bigint } {
+  let totalWithdrawn = 0n;
+  let totalSupplied = 0n;
+  const balanceById = new Map(balances.map((a) => [a.id, a.realInitialAssets]));
+
+  for (const allocation of allocations) {
+    const supplyAssets = balanceById.get(allocation.id) ?? 0n;
+    const withdrawn = supplyAssets > allocation.assets ? supplyAssets - allocation.assets : 0n;
+    if (withdrawn > 0n) {
+      totalWithdrawn += withdrawn;
+      continue;
+    }
+
+    const supplied =
+      allocation.assets === maxUint256
+        ? totalWithdrawn > totalSupplied
+          ? totalWithdrawn - totalSupplied
+          : 0n
+        : allocation.assets > supplyAssets
+          ? allocation.assets - supplyAssets
+          : 0n;
+    totalSupplied += supplied;
+  }
+
+  return { totalWithdrawn, totalSupplied };
+}
+
+function _accrualPad(realInitialAssets: bigint, decrease: bigint): bigint {
+  const bpsPad = (realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
+  return bpsPad < decrease ? bpsPad : decrease;
+}
+
+function _effectiveWithdrawal(realInitialAssets: bigint, decrease: bigint): bigint {
+  return decrease - _accrualPad(realInitialAssets, decrease);
+}
+
+function _findUnpreparedArkWithdrawal(
+  allocations: MarketAllocation[],
+  arks: ArkAllocation[],
+  preparedArks: Set<Address>,
+): Address | null {
+  const arkById = new Map(arks.map((ark) => [ark.id, ark]));
+
+  for (const allocation of allocations) {
+    const ark = arkById.get(allocation.id);
+    if (!ark) continue;
+    if (allocation.assets !== maxUint256 && ark.realInitialAssets > allocation.assets) {
+      if (!preparedArks.has(ark.id)) return ark.id;
+    }
+  }
+
+  return null;
 }
 
 // ============= Helpers =============

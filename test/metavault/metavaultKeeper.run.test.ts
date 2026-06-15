@@ -359,6 +359,36 @@ describe('metavaultRun orchestration', () => {
     expect(handleTransaction).toHaveBeenCalledTimes(3);
   });
 
+  it('does not pre-move an ark whose planned decrease is fully absorbed by the accrual pad', async () => {
+    const { metavaultRun, vaults, selectBuckets, reallocate } = await setupMetavaultRunTest({
+      balances: {
+        [BUFFER]: 280n * S,
+        [ARK_A]: 100_000n * S,
+        [ARK_B]: 620n * S,
+      },
+      poolBalanceCaps: {
+        [ARK_A]: 100n * S,
+      },
+      bucketPlan: [{ bucket: 4150n, amount: 70n * S }],
+    });
+
+    await metavaultRun();
+
+    expect(selectBuckets).toHaveBeenCalledOnce();
+    expect(selectBuckets).toHaveBeenCalledWith(vaults[ARK_B]!, 70n * S);
+    expect(vaults[ARK_A]!.drain).not.toHaveBeenCalled();
+    expect(vaults[ARK_A]!.moveToBuffer).not.toHaveBeenCalled();
+    expect(vaults[ARK_B]!.drain).toHaveBeenCalledOnce();
+    expect(vaults[ARK_B]!.moveToBuffer).toHaveBeenCalledOnce();
+    expect(reallocate).toHaveBeenCalledWith(
+      [
+        { id: ARK_B, assets: 550n * S + accrualPad(620n * S, 70n * S) },
+        { id: BUFFER, assets: maxUint256 },
+      ],
+      3_000_000n,
+    );
+  });
+
   it('treats unchanged target allocations as a no-op and skips reallocate', async () => {
     const { metavaultRun, reallocate, selectBuckets, handleTransaction } =
       await setupMetavaultRunTest({

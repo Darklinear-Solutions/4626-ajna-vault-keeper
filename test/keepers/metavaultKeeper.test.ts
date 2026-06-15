@@ -16,6 +16,36 @@ const accrualPad = (realInitialAssets: bigint, decrease: bigint) => {
   const bps = (realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
   return bps < decrease ? bps : decrease;
 };
+
+const simulateEulerAccounting = (
+  allocations: MarketAllocation[],
+  balances: Array<{ id: Address; realInitialAssets: bigint }>,
+) => {
+  let totalWithdrawn = 0n;
+  let totalSupplied = 0n;
+  const balanceById = new Map(balances.map((entry) => [entry.id, entry.realInitialAssets]));
+
+  for (const allocation of allocations) {
+    const supplyAssets = balanceById.get(allocation.id) ?? 0n;
+    const withdrawn = supplyAssets > allocation.assets ? supplyAssets - allocation.assets : 0n;
+    if (withdrawn > 0n) {
+      totalWithdrawn += withdrawn;
+      continue;
+    }
+
+    const supplied =
+      allocation.assets === maxUint256
+        ? totalWithdrawn > totalSupplied
+          ? totalWithdrawn - totalSupplied
+          : 0n
+        : allocation.assets > supplyAssets
+          ? allocation.assets - supplyAssets
+          : 0n;
+    totalSupplied += supplied;
+  }
+
+  return { totalWithdrawn, totalSupplied };
+};
 import { evaluateRates, type ArkEvaluation } from '../../src/metavault/utils/evaluateRates';
 import { type MarketAllocation } from '../../src/metavault/metavault';
 import { type createVault } from '../../src/ark/vault';
@@ -738,6 +768,34 @@ describe('_buildFinalAllocations', () => {
     expect(result[result.length - 1]!.assets).toBe(maxUint256);
   });
 
+  it('caps exact increasing legs to the effective padded withdrawal', () => {
+    const arks = [
+      makeArk({
+        id: ADDR_A,
+        assets: 80n * S,
+        initialAssets: 100n * S,
+        realInitialAssets: 20_000n * S,
+      }),
+      makeArk({ id: ADDR_B, assets: 115n * S, initialAssets: 100n * S }),
+      makeArk({ id: ADDR_C, assets: 105n * S, initialAssets: 100n * S }),
+    ];
+    const buffer = makeBuffer({ assets: 400n * S, initialAssets: 400n * S });
+
+    const result = _buildFinalAllocations(arks, buffer) as MarketAllocation[];
+
+    expect(result).toEqual([
+      { id: ADDR_A, assets: 19_990n * S },
+      { id: ADDR_B, assets: 110n * S },
+      { id: ADDR_C, assets: maxUint256 },
+    ]);
+    expect(
+      simulateEulerAccounting(result, [
+        ...arks.map((ark) => ({ id: ark.id, realInitialAssets: ark.realInitialAssets })),
+        { id: buffer.id, realInitialAssets: buffer.realInitialAssets },
+      ]),
+    ).toEqual({ totalWithdrawn: 10n * S, totalSupplied: 10n * S });
+  });
+
   it('handles multiple decreasing and multiple increasing entries', () => {
     const arks = [
       makeArk({ id: ADDR_A, assets: 80n * S, initialAssets: 150n * S }), // decreasing (-70)
@@ -895,6 +953,27 @@ describe('_buildFinalAllocations', () => {
     expect(typeof result).toBe('string');
     expect(result).toContain('below planned decrease');
     expect(result).toContain(ADDR_A);
+  });
+
+  it('returns an abort string when the accrual pad absorbs every planned withdrawal', () => {
+    const arks = [
+      makeArk({
+        id: ADDR_A,
+        assets: 80n * S,
+        initialAssets: 100n * S,
+        realInitialAssets: 100_000n * S,
+      }),
+    ];
+    const buffer = makeBuffer({
+      assets: 420n * S,
+      initialAssets: 400n * S,
+      realInitialAssets: 400n * S,
+    });
+
+    const result = _buildFinalAllocations(arks, buffer);
+
+    expect(typeof result).toBe('string');
+    expect(result).toContain('accrual pad absorbs planned withdrawals');
   });
 
   it('preserves the totalWithdrawn = totalSupplied invariant when targets shift to real domain', () => {
