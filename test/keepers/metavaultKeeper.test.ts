@@ -8,7 +8,8 @@ import {
   ACCRUAL_PAD_BPS,
   type ArkAllocation,
   type BufferAllocation,
-} from '../../src/keepers/metavaultKeeper';
+  type MarketAllocation,
+} from '../../src/metavault/planner';
 
 // Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: never exceeds the planned
 // decrease, otherwise the submitted target would invert into a supply branch at Euler.
@@ -47,7 +48,6 @@ const simulateEulerAccounting = (
   return { totalWithdrawn, totalSupplied };
 };
 import { evaluateRates, type ArkEvaluation } from '../../src/metavault/utils/evaluateRates';
-import { type MarketAllocation } from '../../src/metavault/metavault';
 import { type createVault } from '../../src/ark/vault';
 import { type Address, maxUint256 } from 'viem';
 

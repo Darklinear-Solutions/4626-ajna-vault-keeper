@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'child_process';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
-import { createTestConfigPath, loadTestEnv, removeTestConfigPath } from './vitest.testEnv.ts';
+import { createTestConfigPath, loadTestEnv, removeTestConfigPath } from './testEnv.ts';
 
 loadTestEnv('.env');
 process.env.TEST_ENV = 'true';
@@ -37,7 +37,7 @@ async function deployContracts(): Promise<void> {
     }),
   });
 
-  let scripts = [];
+  const scripts = [];
 
   if (process.env.INTEGRATION === 'true') {
     scripts[0] = 'test/script/deploy.integration.s.sol:DeployScript';

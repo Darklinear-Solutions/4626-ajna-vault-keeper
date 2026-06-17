@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { maxUint256, type Address } from 'viem';
-import { ACCRUAL_PAD_BPS } from '../../src/keepers/metavaultKeeper';
+import { ACCRUAL_PAD_BPS } from '../../src/metavault/planner';
 
 // Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: never exceeds the planned
 // decrease, otherwise the submitted target would invert into a supply branch at Euler.

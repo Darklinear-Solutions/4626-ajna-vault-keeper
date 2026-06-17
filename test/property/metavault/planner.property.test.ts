@@ -34,7 +34,7 @@ import {
   type Ark,
   type ArkAllocation,
   type BufferAllocation,
-} from '../../../src/keepers/metavaultKeeper';
+} from '../../../src/metavault/planner';
 
 // Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: the pad is bounded by the
 // planned decrease so the submitted target never exceeds realInitialAssets (which would invert
