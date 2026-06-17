@@ -89,6 +89,7 @@ async function setupMetavaultRunTest({
   evaluations = [],
   bucketPlan = [],
   poolBalanceCaps = {},
+  supplyCaps = {},
   accrued = {},
   poolHasBadDebt = vi.fn().mockResolvedValue(false),
   haltedArks = [],
@@ -100,6 +101,7 @@ async function setupMetavaultRunTest({
   evaluations?: Array<{ address: Address; targets: Address[] }>;
   bucketPlan?: Array<{ bucket: bigint; amount: bigint }>;
   poolBalanceCaps?: Partial<Record<Address, bigint>>;
+  supplyCaps?: Partial<Record<Address, bigint>>;
   accrued?: Partial<Record<Address, bigint>>;
   poolHasBadDebt?: (vault: { getAddress: () => Address }) => Promise<boolean>;
   haltedArks?: Address[];
@@ -124,6 +126,7 @@ async function setupMetavaultRunTest({
     const accrual = accrued[address];
     return callCounts[address]! > 1 && accrual !== undefined ? base + accrual : base;
   });
+  const getSupplyCap = vi.fn(async (address: Address) => supplyCaps[address] ?? maxUint256);
   const getTotalExpectedSupplyAssets = vi.fn().mockResolvedValue(totalAssets);
   const reallocate = vi.fn().mockReturnValue({ kind: 'reallocate' });
   const evaluateRates = vi.fn().mockReturnValue(evaluations);
@@ -181,6 +184,7 @@ async function setupMetavaultRunTest({
   }));
   vi.doMock('../../src/metavault/metavault.ts', () => ({
     getExpectedSupplyAssets,
+    getSupplyCap,
     getTotalExpectedSupplyAssets,
     reallocate,
   }));
@@ -209,6 +213,7 @@ async function setupMetavaultRunTest({
     metavaultRun,
     vaults: vaultFixtures,
     getExpectedSupplyAssets,
+    getSupplyCap,
     getTotalExpectedSupplyAssets,
     reallocate,
     selectBuckets,
@@ -359,6 +364,37 @@ describe('metavaultRun orchestration', () => {
       3_000_000n,
     );
     expect(handleTransaction).toHaveBeenCalledTimes(3);
+  });
+
+  it('uses live supply caps to limit target increases during a buffer drain', async () => {
+    const { metavaultRun, getSupplyCap, reallocate, selectBuckets, handleTransaction, log } =
+      await setupMetavaultRunTest({
+        balances: {
+          [BUFFER]: 450n * S,
+          [ARK_A]: 70n * S,
+          [ARK_B]: 480n * S,
+        },
+        supplyCaps: {
+          [ARK_B]: 500n * S,
+        },
+      });
+
+    await metavaultRun();
+
+    expect(getSupplyCap).toHaveBeenCalledWith(BUFFER);
+    expect(getSupplyCap).toHaveBeenCalledWith(ARK_A);
+    expect(getSupplyCap).toHaveBeenCalledWith(ARK_B);
+    expect(selectBuckets).not.toHaveBeenCalled();
+    expect(reallocate).toHaveBeenCalledWith(
+      [
+        { id: BUFFER, assets: 400n * S + accrualPad(450n * S, 50n * S) },
+        { id: ARK_A, assets: 100n * S },
+        { id: ARK_B, assets: maxUint256 },
+      ],
+      3_000_000n,
+    );
+    expect(handleTransaction).toHaveBeenCalledOnce();
+    expect(log.error).not.toHaveBeenCalled();
   });
 
   it('does not pre-move an ark whose planned decrease is fully absorbed by the accrual pad', async () => {

@@ -160,6 +160,7 @@ const rebalanceScenarioArb = fc
             rate: rates[0],
             minMoveAmount: 1_000_001n,
             hasBadDebt: badDebt[0],
+            supplyCap: maxUint256,
           },
           {
             id: ADDRESSES[1],
@@ -172,6 +173,7 @@ const rebalanceScenarioArb = fc
             rate: rates[1],
             minMoveAmount: 1_000_001n,
             hasBadDebt: badDebt[1],
+            supplyCap: maxUint256,
           },
           {
             id: ADDRESSES[2],
@@ -184,6 +186,7 @@ const rebalanceScenarioArb = fc
             rate: rates[2],
             minMoveAmount: 1_000_001n,
             hasBadDebt: badDebt[2],
+            supplyCap: maxUint256,
           },
         ];
 
@@ -192,6 +195,7 @@ const rebalanceScenarioArb = fc
           assets: bufferAssets,
           initialAssets: bufferAssets,
           realInitialAssets: bufferAssets,
+          supplyCap: maxUint256,
           allocation: bufferAllocation,
         };
 
@@ -256,6 +260,7 @@ const rateScenarioArb = fc
             rate: rates[0],
             minMoveAmount: 1_000_001n,
             hasBadDebt: badDebt[0],
+            supplyCap: maxUint256,
           },
           {
             id: ADDRESSES[1],
@@ -268,6 +273,7 @@ const rateScenarioArb = fc
             rate: rates[1],
             minMoveAmount: 1_000_001n,
             hasBadDebt: badDebt[1],
+            supplyCap: maxUint256,
           },
           {
             id: ADDRESSES[2],
@@ -280,6 +286,7 @@ const rateScenarioArb = fc
             rate: rates[2],
             minMoveAmount: 1_000_001n,
             hasBadDebt: badDebt[2],
+            supplyCap: maxUint256,
           },
         ];
 

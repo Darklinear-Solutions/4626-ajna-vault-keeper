@@ -98,6 +98,7 @@ function makeArk(overrides: Partial<ArkAllocation> & { id: Address }): ArkAlloca
     rate: 100n,
     minMoveAmount: 1_000_001n,
     hasBadDebt: false,
+    supplyCap: maxUint256,
     ...overrides,
     assets,
     initialAssets,
@@ -112,6 +113,7 @@ function makeBuffer(overrides?: Partial<BufferAllocation>): BufferAllocation {
   return {
     id: ADDR_BUF,
     allocation: 40,
+    supplyCap: maxUint256,
     ...overrides,
     assets,
     initialAssets,
@@ -303,6 +305,21 @@ describe('_rebalanceBuffer', () => {
       expect(arks[0]!.assets).toBe(200n * S); // A unchanged
       expect(buffer.assets).toBe(399n * S); // buffer unchanged
     });
+
+    it('limits buffer fills by the buffer supply cap', () => {
+      const arks = [makeArk({ id: ADDR_A, assets: 200n * S, rate: 100n })];
+      const buffer = makeBuffer({
+        assets: 350n * S,
+        initialAssets: 350n * S,
+        realInitialAssets: 350n * S,
+        supplyCap: 370n * S,
+      });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      expect(arks[0]!.assets).toBe(180n * S);
+      expect(buffer.assets).toBe(370n * S);
+    });
   });
 
   describe('buffer excess (drainBuffer)', () => {
@@ -419,6 +436,25 @@ describe('_rebalanceBuffer', () => {
       expect(arks[1]!.assets).toBe(199n * S); // B unchanged
       expect(arks[0]!.assets).toBe(100n * S); // A unchanged
       expect(buffer.assets).toBe(401n * S); // buffer unchanged
+    });
+
+    it('limits buffer drains by the target ark supply cap', () => {
+      const arks = [
+        makeArk({
+          id: ADDR_A,
+          assets: 100n * S,
+          initialAssets: 100n * S,
+          realInitialAssets: 100n * S,
+          rate: 200n,
+          supplyCap: 120n * S,
+        }),
+      ];
+      const buffer = makeBuffer({ assets: 450n * S });
+
+      _rebalanceBuffer(arks, buffer, 1000n * S);
+
+      expect(arks[0]!.assets).toBe(120n * S);
+      expect(buffer.assets).toBe(430n * S);
     });
   });
 });
@@ -637,6 +673,31 @@ describe('_reallocateForRates', () => {
     expect(arks[0]!.assets).toBe(51n * S);
     expect(arks[1]!.assets).toBe(199n * S);
   });
+
+  it('limits target moves by the target ark supply cap', () => {
+    const arks = [
+      makeArk({ id: ADDR_A, assets: 200n * S, min: 5, max: 20, rate: 100n }),
+      makeArk({
+        id: ADDR_B,
+        assets: 100n * S,
+        initialAssets: 100n * S,
+        realInitialAssets: 100n * S,
+        min: 5,
+        max: 20,
+        rate: 200n,
+        supplyCap: 130n * S,
+      }),
+    ];
+    const evaluations: ArkEvaluation[] = [
+      { address: ADDR_A, targets: [ADDR_B] },
+      { address: ADDR_B, targets: [] },
+    ];
+
+    _reallocateForRates(arks, evaluations, 1000n * S);
+
+    expect(arks[0]!.assets).toBe(170n * S);
+    expect(arks[1]!.assets).toBe(130n * S);
+  });
 });
 
 // ============= _validateAllocations =============
@@ -679,6 +740,21 @@ describe('_validateAllocations', () => {
     const buffer = makeBuffer({ assets: 400n * S });
 
     expect(_validateAllocations(arks, buffer, totalAssets)).toContain('above max');
+  });
+
+  it('returns error when planned supply exceeds the live supply cap', () => {
+    const arks = [
+      makeArk({
+        id: ADDR_A,
+        assets: 125n * S,
+        initialAssets: 100n * S,
+        realInitialAssets: 100n * S,
+        supplyCap: 120n * S,
+      }),
+    ];
+    const buffer = makeBuffer({ assets: 400n * S });
+
+    expect(_validateAllocations(arks, buffer, totalAssets)).toContain('exceeds supply cap');
   });
 
   it('passes when arks at exact min and max boundaries', () => {
@@ -974,6 +1050,26 @@ describe('_buildFinalAllocations', () => {
 
     expect(typeof result).toBe('string');
     expect(result).toContain('accrual pad absorbs planned withdrawals');
+  });
+
+  it('returns an abort string when refreshed balances leave insufficient supply cap', () => {
+    const arks = [
+      makeArk({ id: ADDR_A, assets: 80n * S, initialAssets: 100n * S }),
+      makeArk({
+        id: ADDR_B,
+        assets: 120n * S,
+        initialAssets: 100n * S,
+        realInitialAssets: 115n * S,
+        supplyCap: 118n * S,
+      }),
+    ];
+    const buffer = makeBuffer({ assets: 400n * S, initialAssets: 400n * S });
+
+    const result = _buildFinalAllocations(arks, buffer);
+
+    expect(typeof result).toBe('string');
+    expect(result).toContain('supply cap exceeded');
+    expect(result).toContain(ADDR_B);
   });
 
   it('preserves the totalWithdrawn = totalSupplied invariant when targets shift to real domain', () => {

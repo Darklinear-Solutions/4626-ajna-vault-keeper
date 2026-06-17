@@ -4,6 +4,7 @@ import { isArkHalted } from './arkKeeper.ts';
 import { evaluateRates, type ArkEvaluation } from '../metavault/utils/evaluateRates.ts';
 import {
   getExpectedSupplyAssets,
+  getSupplyCap,
   getTotalExpectedSupplyAssets,
   reallocate,
   type MarketAllocation,
@@ -33,6 +34,7 @@ export type ArkAllocation = {
   assets: bigint;
   initialAssets: bigint;
   realInitialAssets: bigint;
+  supplyCap: bigint;
   vault: ReturnType<typeof createVault>;
   min: number;
   max: number;
@@ -46,7 +48,15 @@ export type BufferAllocation = {
   assets: bigint;
   initialAssets: bigint;
   realInitialAssets: bigint;
+  supplyCap: bigint;
   allocation: number;
+};
+
+type SupplyCappedAllocation = {
+  assets: bigint;
+  initialAssets: bigint;
+  realInitialAssets: bigint;
+  supplyCap: bigint;
 };
 
 // ============= Main Run Function =============
@@ -141,8 +151,9 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
   for (const arkConfig of config.arks) {
     const vault = createVault(arkConfig.address);
     const settings = resolveArkSettings(arkConfig);
-    const [balance, rate, badDebt] = await Promise.all([
+    const [balance, supplyCap, rate, badDebt] = await Promise.all([
       getExpectedSupplyAssets(arkConfig.address) as Promise<bigint>,
+      getSupplyCap(arkConfig.address),
       vault.getBorrowFeeRate() as Promise<bigint>,
       poolHasBadDebt(vault, settings.maxAuctionAge),
     ]);
@@ -153,6 +164,7 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
       assets: cappedBalance,
       initialAssets: cappedBalance,
       realInitialAssets: balance,
+      supplyCap,
       vault,
       min: arkConfig.allocation.min,
       max: arkConfig.allocation.max,
@@ -166,13 +178,17 @@ async function _buildArkAllocations(): Promise<ArkAllocation[]> {
 }
 
 async function _buildBufferAllocation(): Promise<BufferAllocation> {
-  const balance = (await getExpectedSupplyAssets(config.buffer.address)) as bigint;
+  const [balance, supplyCap] = (await Promise.all([
+    getExpectedSupplyAssets(config.buffer.address),
+    getSupplyCap(config.buffer.address),
+  ])) as [bigint, bigint];
 
   return {
     id: config.buffer.address,
     assets: balance,
     initialAssets: balance,
     realInitialAssets: balance,
+    supplyCap,
     allocation: config.buffer.allocation,
   };
 }
@@ -188,8 +204,9 @@ export function _rebalanceBuffer(
     const maxAssets = (totalAssets * BigInt(ark.max)) / 100n;
     if (ark.assets > maxAssets) {
       const excess = ark.assets - maxAssets;
-      ark.assets -= excess;
-      buffer.assets += excess;
+      const addition = min(excess, remainingSupplyCapacity(buffer));
+      ark.assets -= addition;
+      buffer.assets += addition;
     }
   }
 
@@ -213,7 +230,7 @@ function _fillBuffer(
   bufferTarget: bigint,
   totalAssets: bigint,
 ): void {
-  let deficit = bufferTarget - buffer.assets;
+  let deficit = receivableCapacity(buffer, bufferTarget);
 
   const sorted = [...arks].sort((a, b) => (a.rate < b.rate ? -1 : a.rate > b.rate ? 1 : 0));
 
@@ -260,10 +277,10 @@ function _drainBuffer(
     if (ark.hasBadDebt) continue;
 
     const maxAssets = (totalAssets * BigInt(ark.max)) / 100n;
-    const capacity = maxAssets - ark.assets;
+    const capacity = receivableCapacity(ark, maxAssets);
     if (capacity <= 0n) continue;
 
-    const addition = capacity < excess ? capacity : excess;
+    const addition = min(capacity, excess);
     if (addition < ark.minMoveAmount) continue;
     ark.assets += addition;
     buffer.assets -= addition;
@@ -299,10 +316,10 @@ export function _reallocateForRates(
       if (!target || target.hasBadDebt) continue;
 
       const maxAssets = (totalAssets * BigInt(target.max)) / 100n;
-      const capacity = maxAssets - target.assets;
+      const capacity = receivableCapacity(target, maxAssets);
       if (capacity <= 0n) continue;
 
-      const moveAmount = available < capacity ? available : capacity;
+      const moveAmount = min(available, capacity);
       if (moveAmount < ark.minMoveAmount) continue;
       ark.assets -= moveAmount;
       target.assets += moveAmount;
@@ -366,15 +383,18 @@ async function _refreshRealInitialAssets(
   arks: ArkAllocation[],
   buffer: BufferAllocation,
 ): Promise<void> {
-  const balances = (await Promise.all([
-    ...arks.map((ark) => getExpectedSupplyAssets(ark.id)),
-    getExpectedSupplyAssets(buffer.id),
-  ])) as bigint[];
+  const ids = [...arks.map((ark) => ark.id), buffer.id];
+  const [balances, supplyCaps] = (await Promise.all([
+    Promise.all(ids.map((id) => getExpectedSupplyAssets(id))),
+    Promise.all(ids.map((id) => getSupplyCap(id))),
+  ])) as [bigint[], bigint[]];
 
   arks.forEach((ark, i) => {
     ark.realInitialAssets = balances[i]!;
+    ark.supplyCap = supplyCaps[i]!;
   });
   buffer.realInitialAssets = balances[balances.length - 1]!;
+  buffer.supplyCap = supplyCaps[supplyCaps.length - 1]!;
 }
 
 // ============= Validation =============
@@ -398,6 +418,8 @@ export function _validateAllocations(
     if (ark.assets > maxAssets + tolerance) {
       return `Ark ${ark.id} allocation ${ark.assets} is above max ${maxAssets}`;
     }
+    const supplyCapError = supplyCapErrorMessage('Ark', ark.id, ark);
+    if (supplyCapError) return supplyCapError;
   }
 
   const allArksAtMax = arks.every(
@@ -416,6 +438,9 @@ export function _validateAllocations(
     }
   }
 
+  const bufferSupplyCapError = supplyCapErrorMessage('Buffer', buffer.id, buffer);
+  if (bufferSupplyCapError) return bufferSupplyCapError;
+
   return null;
 }
 
@@ -430,11 +455,13 @@ export function _buildFinalAllocations(
       id: a.id,
       delta: a.assets - a.initialAssets,
       realInitialAssets: a.realInitialAssets,
+      supplyCap: a.supplyCap,
     })),
     {
       id: buffer.id,
       delta: buffer.assets - buffer.initialAssets,
       realInitialAssets: buffer.realInitialAssets,
+      supplyCap: buffer.supplyCap,
     },
   ];
 
@@ -494,6 +521,9 @@ export function _buildFinalAllocations(
   }
 
   const simulated = _simulateEulerReallocationAccounting(ordered, all);
+  if (simulated.capExceeded) {
+    return `supply cap exceeded for ${simulated.capExceeded.id}: final assets ${simulated.capExceeded.finalAssets} > cap ${simulated.capExceeded.supplyCap}`;
+  }
   if (simulated.totalWithdrawn !== simulated.totalSupplied) {
     return `inconsistent reallocation: totalWithdrawn (${simulated.totalWithdrawn}) != totalSupplied (${simulated.totalSupplied})`;
   }
@@ -503,14 +533,19 @@ export function _buildFinalAllocations(
 
 function _simulateEulerReallocationAccounting(
   allocations: MarketAllocation[],
-  balances: Array<{ id: Address; realInitialAssets: bigint }>,
-): { totalWithdrawn: bigint; totalSupplied: bigint } {
+  balances: Array<{ id: Address; realInitialAssets: bigint; supplyCap: bigint }>,
+): {
+  totalWithdrawn: bigint;
+  totalSupplied: bigint;
+  capExceeded?: { id: Address; finalAssets: bigint; supplyCap: bigint };
+} {
   let totalWithdrawn = 0n;
   let totalSupplied = 0n;
-  const balanceById = new Map(balances.map((a) => [a.id, a.realInitialAssets]));
+  const balanceById = new Map(balances.map((a) => [a.id, a]));
 
   for (const allocation of allocations) {
-    const supplyAssets = balanceById.get(allocation.id) ?? 0n;
+    const balance = balanceById.get(allocation.id);
+    const supplyAssets = balance?.realInitialAssets ?? 0n;
     const withdrawn = supplyAssets > allocation.assets ? supplyAssets - allocation.assets : 0n;
     if (withdrawn > 0n) {
       totalWithdrawn += withdrawn;
@@ -525,10 +560,65 @@ function _simulateEulerReallocationAccounting(
         : allocation.assets > supplyAssets
           ? allocation.assets - supplyAssets
           : 0n;
+    const finalAssets = supplyAssets + supplied;
+    if (balance && supplied > 0n && finalAssets > balance.supplyCap) {
+      return {
+        totalWithdrawn,
+        totalSupplied,
+        capExceeded: { id: allocation.id, finalAssets, supplyCap: balance.supplyCap },
+      };
+    }
     totalSupplied += supplied;
   }
 
   return { totalWithdrawn, totalSupplied };
+}
+
+function receivableCapacity(allocation: SupplyCappedAllocation, maxAssets: bigint): bigint {
+  if (allocation.assets >= maxAssets) return 0n;
+  return min(maxAssets - allocation.assets, remainingSupplyCapacity(allocation));
+}
+
+function remainingSupplyCapacity(allocation: SupplyCappedAllocation): bigint {
+  const neutralIncrease =
+    allocation.assets < allocation.initialAssets
+      ? allocation.initialAssets - allocation.assets
+      : 0n;
+  const plannedSupply =
+    allocation.assets > allocation.initialAssets
+      ? allocation.assets - allocation.initialAssets
+      : 0n;
+  const capSupply =
+    allocation.supplyCap > allocation.realInitialAssets
+      ? allocation.supplyCap - allocation.realInitialAssets
+      : 0n;
+
+  return neutralIncrease + (capSupply > plannedSupply ? capSupply - plannedSupply : 0n);
+}
+
+function plannedSupply(allocation: SupplyCappedAllocation): bigint {
+  return allocation.assets > allocation.initialAssets
+    ? allocation.assets - allocation.initialAssets
+    : 0n;
+}
+
+function supplyCapErrorMessage(
+  label: 'Ark' | 'Buffer',
+  id: Address,
+  allocation: SupplyCappedAllocation,
+): string | null {
+  const supply = plannedSupply(allocation);
+  const cap =
+    allocation.supplyCap > allocation.realInitialAssets
+      ? allocation.supplyCap - allocation.realInitialAssets
+      : 0n;
+  return supply > cap
+    ? `${label} ${id} planned supply ${supply} exceeds supply cap capacity ${cap}`
+    : null;
+}
+
+function min(a: bigint, b: bigint): bigint {
+  return a < b ? a : b;
 }
 
 function _accrualPad(realInitialAssets: bigint, decrease: bigint): bigint {
