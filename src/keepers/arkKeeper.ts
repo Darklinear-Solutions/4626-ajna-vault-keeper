@@ -21,16 +21,15 @@ type KeeperRunData = {
   buckets: readonly bigint[];
   bufferTotal: bigint;
   bufferTarget: bigint;
-  lup: BucketPrice;
-  htp: BucketPrice;
+  lup: PriceData;
+  htp: PriceData;
   price: bigint;
   optimalBucket: bigint;
   minAmount: bigint;
 };
 
-type BucketPrice = {
+type PriceData = {
   price: bigint;
-  index: bigint;
 };
 
 type MoveOperation = {
@@ -414,9 +413,7 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
     if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
   }
 
-  const [lupIndex, htpIndex, optimalBucket, buckets, bufferTarget] = await Promise.all([
-    vault.getPriceToIndex(lup),
-    vault.getPriceToIndex(htp),
+  const [optimalBucket, buckets, bufferTarget] = await Promise.all([
     _calculateOptimalBucket(price),
     vault.getBuckets(),
     _calculateBufferTarget(),
@@ -428,8 +425,8 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
     buckets,
     bufferTotal,
     bufferTarget,
-    lup: { price: lup, index: lupIndex },
-    htp: { price: htp, index: htpIndex },
+    lup: { price: lup },
+    htp: { price: htp },
     price: BigInt(price),
     optimalBucket,
     minAmount: _settings.minMoveAmount,
