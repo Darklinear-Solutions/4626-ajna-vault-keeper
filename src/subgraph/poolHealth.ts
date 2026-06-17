@@ -14,6 +14,8 @@ type LiquidationAuction = {
   kickTime: string;
 };
 
+const AUCTION_PAGE_SIZE = 1000;
+
 type VaultLike = {
   getAddress: () => Address | undefined;
   getPoolAddress: () => Promise<Address>;
@@ -56,19 +58,37 @@ export async function _getUnsettledAuctions(
     const subgraphUrl = env.SUBGRAPH_URL;
 
     const query = gql`
-      query GetUnsettledAuctions($poolId: String!) {
-        liquidationAuctions(where: { pool: $poolId, settled: false }) {
+      query GetUnsettledAuctions($poolId: String!, $first: Int!, $skip: Int!) {
+        liquidationAuctions(
+          first: $first
+          skip: $skip
+          orderBy: id
+          orderDirection: asc
+          where: { pool: $poolId, settled: false }
+        ) {
           borrower
           kickTime
         }
       }
     `;
 
-    const result: GetUnsettledAuctionsResponse = await request(subgraphUrl!, query, {
-      poolId: poolAddress,
-    });
+    const liquidationAuctions: LiquidationAuction[] = [];
+    let skip = 0;
 
-    return result;
+    while (true) {
+      const result = await request<GetUnsettledAuctionsResponse>(subgraphUrl!, query, {
+        poolId: poolAddress,
+        first: AUCTION_PAGE_SIZE,
+        skip,
+      });
+
+      liquidationAuctions.push(...result.liquidationAuctions);
+
+      if (result.liquidationAuctions.length < AUCTION_PAGE_SIZE) break;
+      skip += AUCTION_PAGE_SIZE;
+    }
+
+    return { liquidationAuctions };
   } catch (err) {
     log.error(
       {
