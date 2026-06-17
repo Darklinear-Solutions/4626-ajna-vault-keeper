@@ -30,14 +30,19 @@ export class SubgraphUnavailableError extends Error {
 export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): Promise<boolean> {
   const auctions = await _getUnsettledAuctions(vault);
   const nowSec = await getChainTime();
-  const auctionsBeforeCutoff = _filterAuctions(auctions, nowSec, maxAuctionAge);
 
-  for (let i = 0; i < auctionsBeforeCutoff.length; i++) {
+  for (let i = 0; i < auctions.liquidationAuctions.length; i++) {
+    const borrower = auctions.liquidationAuctions[i]!.borrower;
     const [kickTime, collateralRemaining, debtRemaining] = await vault.getAuctionStatus(
-      auctionsBeforeCutoff[i]!.borrower as Address,
+      borrower as Address,
     );
+    const activeDebtAuction = kickTime !== 0n && debtRemaining > 0n;
 
-    if (kickTime !== 0n && debtRemaining > 0n && collateralRemaining === 0n) return true;
+    if (
+      activeDebtAuction &&
+      (collateralRemaining === 0n || isPastAuctionAge(kickTime, nowSec, maxAuctionAge))
+    )
+      return true;
   }
 
   return false;
@@ -95,21 +100,21 @@ export function _filterAuctions(
   maxAuctionAge?: number,
 ): LiquidationAuction[] {
   const unsettledAuctions = response.liquidationAuctions;
-  const maxAge = maxAuctionAge ?? config.arkGlobal.maxAuctionAge;
-
-  if (maxAge === 0) return unsettledAuctions;
-
-  const maxAgeBig = BigInt(maxAge);
   const auctionsBeforeCutoff: LiquidationAuction[] = [];
 
   for (let i = 0; i < unsettledAuctions.length; i++) {
     const kickTime = BigInt(unsettledAuctions[i]!.kickTime);
-    const auctionAge = nowSec - kickTime;
 
-    if (auctionAge > maxAgeBig) {
+    if (isPastAuctionAge(kickTime, nowSec, maxAuctionAge)) {
       auctionsBeforeCutoff.push(unsettledAuctions[i]!);
     }
   }
 
   return auctionsBeforeCutoff;
+}
+
+function isPastAuctionAge(kickTime: bigint, nowSec: bigint, maxAuctionAge?: number): boolean {
+  const maxAge = maxAuctionAge ?? config.arkGlobal.maxAuctionAge;
+  if (maxAge === 0) return true;
+  return nowSec - kickTime > BigInt(maxAge);
 }

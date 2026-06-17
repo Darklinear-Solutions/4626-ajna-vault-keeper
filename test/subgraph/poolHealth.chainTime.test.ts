@@ -132,7 +132,7 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
     return await import('../../src/subgraph/poolHealth');
   }
 
-  it('flags bad debt when chain time puts the auction past the cutoff even if Date.now would not', async () => {
+  it('flags stale active debt when chain time puts the auction past the cutoff even if Date.now would not', async () => {
     const chainTimeSec = 1_700_000_700n;
     const dateNowSec = 1_700_000_000n;
     const kickTimeSec = 1_700_000_050n;
@@ -146,7 +146,7 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
       });
 
       const vault = makeVault();
-      vault.getAuctionStatus.mockResolvedValue([1n, 0n, 1n]);
+      vault.getAuctionStatus.mockResolvedValue([kickTimeSec, 1n, 1n]);
 
       await expect(poolHasBadDebt(vault)).resolves.toBe(true);
       expect(vault.getAuctionStatus).toHaveBeenCalledExactlyOnceWith(BORROWER);
@@ -155,7 +155,7 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
     }
   });
 
-  it('does not flag bad debt when chain time leaves the auction inside the cutoff even if Date.now would', async () => {
+  it('does not flag collateralized active debt when chain time leaves the auction inside the cutoff even if Date.now would', async () => {
     const chainTimeSec = 1_700_000_100n;
     const dateNowSec = 1_700_000_900n;
     const kickTimeSec = 1_700_000_050n;
@@ -169,11 +169,45 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
       });
 
       const vault = makeVault();
+      vault.getAuctionStatus.mockResolvedValue([kickTimeSec, 1n, 1n]);
 
       await expect(poolHasBadDebt(vault)).resolves.toBe(false);
-      expect(vault.getAuctionStatus).not.toHaveBeenCalled();
+      expect(vault.getAuctionStatus).toHaveBeenCalledExactlyOnceWith(BORROWER);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('flags zero-collateral bad debt even when the auction is inside the cutoff', async () => {
+    const chainTimeSec = 1_700_000_100n;
+    const kickTimeSec = 1_700_000_050n;
+
+    const { poolHasBadDebt } = await loadPoolHealth({
+      chainTimeSec,
+      auctions: [{ borrower: BORROWER, kickTime: String(kickTimeSec) }],
+    });
+
+    const vault = makeVault();
+    vault.getAuctionStatus.mockResolvedValue([kickTimeSec, 0n, 1n]);
+
+    await expect(poolHasBadDebt(vault)).resolves.toBe(true);
+    expect(vault.getAuctionStatus).toHaveBeenCalledExactlyOnceWith(BORROWER);
+  });
+
+  it('uses onchain kickTime for the stale active debt cutoff', async () => {
+    const chainTimeSec = 1_700_000_700n;
+    const subgraphKickTimeSec = 1_700_000_000n;
+    const onchainKickTimeSec = 1_700_000_650n;
+
+    const { poolHasBadDebt } = await loadPoolHealth({
+      chainTimeSec,
+      auctions: [{ borrower: BORROWER, kickTime: String(subgraphKickTimeSec) }],
+    });
+
+    const vault = makeVault();
+    vault.getAuctionStatus.mockResolvedValue([onchainKickTimeSec, 1n, 1n]);
+
+    await expect(poolHasBadDebt(vault)).resolves.toBe(false);
+    expect(vault.getAuctionStatus).toHaveBeenCalledExactlyOnceWith(BORROWER);
   });
 });
