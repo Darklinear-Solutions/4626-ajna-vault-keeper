@@ -105,6 +105,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | `oracle.onchainPrimary`          | Use onchain oracle as primary instead of CoinGecko.                              | Boolean                  | Required                                       | N/A              |
     | `oracle.onchainAddress`          | Address of Chronicle onchain oracle.                                             | Ethereum address (`0x...`) | Conditional (if `onchainPrimary` is true)    | None             |
     | `oracle.onchainMaxStaleness`     | Max allowed age of onchain price data. When omitted and the onchain oracle is primary, the keeper defaults this to `86400` seconds. Set to `null` only to explicitly disable the staleness check. | Integer (seconds) or `null` | Optional                                  | `86400` when `oracle.onchainPrimary` is `true`, otherwise `null` |
+    | `oracle.offchainMaxStaleness`    | Max allowed age of CoinGecko price data based on the response `last_updated_at` timestamp. | Integer (seconds)        | Optional                                       | `86400`          |
     | `oracle.fixedPrice`              | The keeper can be configured to skip both oracles and use a hard-coded price, defined here. Set to `null` to use the live oracle. The value is parsed as a decimal string into Ajna's 18-decimal price domain, independent of quote-token decimals. Numeric literals are rejected to avoid precision loss. When enabled, the keeper emits a startup warning because this mode bypasses live oracle checks. | String decimal (e.g. `"1.00"`) or `null` | Optional | `null` |
     | `oracle.futureSkewTolerance`     | Max clock drift allowed from Chronicle timestamps.                               | Integer (seconds)        | Optional                                       | 120 (2 minutes)  |
     | `transaction.gasBuffer`          | Accounts for occasional Viem gas underestimation for the functions that interact with Ajna, resulting in sporadic `OutOfGas` reversions. | Integer (percentage)     | Optional                                       | 50 (50%)         |
@@ -392,7 +393,7 @@ The settings below change the operational model and should be reviewed explicitl
 | ------- | ------------------- |
 | `keeper.exitOnSubgraphFailure` | `true` fails closed when the bad-debt dependency is unavailable. `false` keeps the process running but treats subgraph outages as if there are no blocking auctions. |
 | `oracle.fixedPrice` | Bypasses live oracle reads and freshness checks. Use only as an explicit emergency or controlled override. |
-| `oracle.onchainPrimary`, `oracle.onchainAddress`, `oracle.apiUrl`, `oracle.onchainMaxStaleness` | Define which oracle path the keeper trusts first, whether it can fall back, and how stale Chronicle data may be before the run aborts. |
+| `oracle.onchainPrimary`, `oracle.onchainAddress`, `oracle.apiUrl`, `oracle.onchainMaxStaleness`, `oracle.offchainMaxStaleness` | Define which oracle path the keeper trusts first, whether it can fall back, and how stale live oracle data may be before the run aborts. |
 | `transaction.gasBuffer`, `transaction.defaultGas`, `transaction.confirmations` | Define gas padding, fallback gas limit, and how long the keeper waits before treating each submitted step as confirmed. |
 
 ## <a name="failure-and-recovery"></a>Failure and Recovery

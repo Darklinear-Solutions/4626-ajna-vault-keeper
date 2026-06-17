@@ -206,6 +206,28 @@ describe('config: oracle section', () => {
     const { config } = await import('../../src/utils/config.ts');
     expect(config.oracle.futureSkewTolerance).toBe(0);
   });
+
+  it('defaults offchainMaxStaleness', async () => {
+    mockConfigFs(makeConfig());
+    const { config } = await import('../../src/utils/config.ts');
+    expect(config.oracle.offchainMaxStaleness).toBe(86400);
+  });
+
+  it('rejects non-positive offchainMaxStaleness values', async () => {
+    mockConfigFs(
+      makeConfig({
+        oracle: {
+          onchainPrimary: true,
+          onchainAddress: A2,
+          fixedPrice: null,
+          offchainMaxStaleness: 0,
+        },
+      }),
+    );
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow(
+      'config.json: oracle.offchainMaxStaleness must be a positive integer',
+    );
+  });
 });
 
 describe('config: transaction section', () => {

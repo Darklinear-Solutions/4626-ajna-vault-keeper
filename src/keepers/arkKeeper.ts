@@ -8,6 +8,7 @@ import { getPrice } from '../oracle/price.ts';
 import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
 import { createVault } from '../ark/vault.ts';
 import { getChainTime, ChainTimeUnavailableError } from '../utils/chainTime.ts';
+import { AJNA_MAX_FENWICK_INDEX } from '../ajna/constants.ts';
 import { type Address } from 'viem';
 
 const haltedArks = new Set<Address>();
@@ -435,7 +436,11 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
 
 export async function _calculateOptimalBucket(price: bigint): Promise<bigint> {
   const currentPriceIndex = await vault.getPriceToIndex(price);
-  return currentPriceIndex + _settings.optimalBucketDiff;
+  const optimalBucket = currentPriceIndex + _settings.optimalBucketDiff;
+  if (optimalBucket === 0n || optimalBucket > AJNA_MAX_FENWICK_INDEX) {
+    return _logRunExit('optimal bucket is outside Ajna bucket range');
+  }
+  return optimalBucket;
 }
 
 export async function _calculateBufferTarget(): Promise<bigint> {

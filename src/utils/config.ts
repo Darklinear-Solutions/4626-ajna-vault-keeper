@@ -37,6 +37,7 @@ type RawConfig = {
     onchainPrimary: boolean;
     onchainAddress?: string;
     onchainMaxStaleness?: number | null;
+    offchainMaxStaleness?: number;
     fixedPrice: string | null;
     futureSkewTolerance?: number;
   };
@@ -70,8 +71,9 @@ type RawConfig = {
 // ============= Defaults =============
 
 export const DEFAULT_ONCHAIN_MAX_STALENESS = 86400;
+export const DEFAULT_OFFCHAIN_MAX_STALENESS = 86400;
 export const DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS = 30000;
-const DEFAULT_FUTURE_SKEW_TOLERANCE = 120;
+export const DEFAULT_FUTURE_SKEW_TOLERANCE = 120;
 const DEFAULT_BUFFER_PADDING = '100000000000000';
 const DEFAULT_MIN_MOVE_AMOUNT = '1000001';
 const DEFAULT_MIN_TIME_SINCE_BANKRUPTCY = 259200;
@@ -216,6 +218,18 @@ function validateOracle(c: RawConfig): void {
       },
     );
   }
+
+  if (c.oracle.offchainMaxStaleness !== undefined) {
+    requireSafeInteger(
+      c.oracle.offchainMaxStaleness,
+      'oracle.offchainMaxStaleness',
+      { min: 1 },
+      {
+        detail: 'must be a positive integer',
+      },
+    );
+  }
+  c.oracle.offchainMaxStaleness ??= DEFAULT_OFFCHAIN_MAX_STALENESS;
 
   if (c.oracle.futureSkewTolerance !== undefined) {
     requireSafeInteger(c.oracle.futureSkewTolerance, 'oracle.futureSkewTolerance', { min: 0 });
