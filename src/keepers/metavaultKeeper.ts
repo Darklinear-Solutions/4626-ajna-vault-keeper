@@ -15,7 +15,7 @@ import { ChainTimeUnavailableError } from '../utils/chainTime.ts';
 import { log } from '../utils/logger.ts';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
 import { selectBuckets, type BucketMove } from '../ark/utils/selectBuckets.ts';
-import { toWad } from '../utils/decimalConversion.ts';
+import { toWad, toWadTokenUnit } from '../utils/decimalConversion.ts';
 import { type Address, maxUint256 } from 'viem';
 
 export const ACCRUAL_PAD_BPS = 5n;
@@ -342,7 +342,10 @@ async function _executeMoveToBufferCalls(arks: ArkAllocation[]): Promise<Set<Add
 
     const assetDecimals = (await ark.vault.getAssetDecimals()) as number;
     const amountToMoveWad = toWad(decrease, assetDecimals);
-    const bucketPlan = await selectBuckets(ark.vault, amountToMoveWad);
+    const assetUnitWad = toWadTokenUnit(assetDecimals);
+    const bucketPlan = (await selectBuckets(ark.vault, amountToMoveWad)).filter(
+      ({ amount }) => amount >= assetUnitWad,
+    );
 
     const plannedCoverage = bucketPlan.reduce((sum, p) => sum + p.amount, 0n);
     if (plannedCoverage < amountToMoveWad) {

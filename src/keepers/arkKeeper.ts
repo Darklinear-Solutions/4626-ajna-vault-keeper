@@ -1,7 +1,7 @@
 import { type ResolvedArkSettings } from '../utils/config.ts';
 import { config } from '../utils/config.ts';
 import { log } from '../utils/logger.ts';
-import { toWad } from '../utils/decimalConversion.ts';
+import { toWad, toWadTokenUnit } from '../utils/decimalConversion.ts';
 import { poolBalanceCapWad } from '../ajna/utils/poolBalanceCap.ts';
 import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction.ts';
 import { getPrice } from '../oracle/price.ts';
@@ -27,6 +27,7 @@ type KeeperRunData = {
   price: bigint;
   optimalBucket: bigint;
   minAmount: bigint;
+  assetUnitWad: bigint;
 };
 
 type PriceData = {
@@ -131,7 +132,7 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
     const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data, i);
 
     for (const op of operations) {
-      const txData = await executeMoveOperation(op);
+      const txData = await executeMoveOperation(op, data);
 
       if (op.to === 'Buffer' && txData?.status) {
         bufferNeeded = await _calculateBufferDeficit(data);
@@ -152,7 +153,7 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
     if (surplus <= _settings.bufferPadding + data.minAmount) return;
 
     const amount = surplus - _settings.bufferPadding;
-    await moveExcessFromBuffer(amount, data.optimalBucket);
+    await moveExcessFromBuffer(amount, data.optimalBucket, data);
   } else {
     const deficit = -difference;
     if (deficit <= _settings.bufferPadding + data.minAmount) return;
@@ -172,15 +173,16 @@ function planBucketOperations(
   bucketIndex: number,
 ): MoveOperation[] {
   const operations: MoveOperation[] = [];
+  const bufferAmount = bufferNeeded < amountToMove ? bufferNeeded : amountToMove;
 
-  if (bufferNeeded <= data.minAmount) {
+  if (bufferNeeded <= data.minAmount || bufferAmount < data.assetUnitWad) {
     operations.push({
       from: bucket,
       to: data.optimalBucket,
       amount: amountToMove,
       bucketIndex,
     });
-  } else if (bufferNeeded >= amountToMove) {
+  } else if (bufferAmount === amountToMove) {
     operations.push({
       from: bucket,
       to: 'Buffer',
@@ -191,13 +193,13 @@ function planBucketOperations(
     operations.push({
       from: bucket,
       to: 'Buffer',
-      amount: bufferNeeded,
+      amount: bufferAmount,
       bucketIndex,
     });
     operations.push({
       from: bucket,
       to: data.optimalBucket,
-      amount: amountToMove - bufferNeeded,
+      amount: amountToMove - bufferAmount,
       bucketIndex,
     });
   }
@@ -207,8 +209,12 @@ function planBucketOperations(
 
 // ============= Move Execution =============
 
-async function executeMoveOperation(op: MoveOperation): Promise<TransactionData | undefined> {
+async function executeMoveOperation(
+  op: MoveOperation,
+  data: KeeperRunData,
+): Promise<TransactionData | undefined> {
   if (isCurrentArkHalted()) return;
+  if ((op.from === 'Buffer' || op.to === 'Buffer') && op.amount < data.assetUnitWad) return;
   if (op.from === 'Buffer') {
     const gas = await getGasWithBuffer(
       'vault',
@@ -261,8 +267,13 @@ async function _executeMoveTransaction(
   return result;
 }
 
-async function moveExcessFromBuffer(amount: bigint, targetBucket: bigint): Promise<void> {
+async function moveExcessFromBuffer(
+  amount: bigint,
+  targetBucket: bigint,
+  data: KeeperRunData,
+): Promise<void> {
   if (isCurrentArkHalted()) return;
+  if (amount < data.assetUnitWad) return;
   const vaultAddress = vault.getAddress();
 
   const drainTx = await handleTransaction(vault.drain(targetBucket), {
@@ -311,6 +322,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       bucketValue >= remaining ? remaining : bucketValue,
       vault,
     );
+    if (amountToMove < data.assetUnitWad) continue;
 
     const gas = await getGasWithBuffer(
       'vault',
@@ -414,10 +426,11 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
     if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
   }
 
-  const [optimalBucket, buckets, bufferTarget] = await Promise.all([
+  const [optimalBucket, buckets, bufferTarget, assetDecimals] = await Promise.all([
     _calculateOptimalBucket(price),
     vault.getBuckets(),
     _calculateBufferTarget(),
+    vault.getAssetDecimals(),
   ]);
 
   buckets.sort((a: bigint, b: bigint) => (a > b ? 1 : -1));
@@ -431,6 +444,7 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
     price: BigInt(price),
     optimalBucket,
     minAmount: _settings.minMoveAmount,
+    assetUnitWad: toWadTokenUnit(assetDecimals),
   };
 }
 

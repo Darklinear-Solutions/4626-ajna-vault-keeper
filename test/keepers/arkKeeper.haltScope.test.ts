@@ -78,6 +78,7 @@ describe('ark halt scoping', () => {
     }));
     vi.doMock('../../src/utils/decimalConversion.ts', () => ({
       toWad: vi.fn((amount: bigint) => amount),
+      toWadTokenUnit: vi.fn(() => 1n),
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({ log }));
     vi.doMock('../../src/utils/chainTime.ts', () => ({
@@ -127,7 +128,10 @@ describe('ark halt scoping', () => {
     }));
     vi.doMock('../../src/oracle/price.ts', () => ({ getPrice: vi.fn() }));
     vi.doMock('../../src/ajna/utils/poolBalanceCap.ts', () => ({ poolBalanceCapWad: vi.fn() }));
-    vi.doMock('../../src/utils/decimalConversion.ts', () => ({ toWad: vi.fn() }));
+    vi.doMock('../../src/utils/decimalConversion.ts', () => ({
+      toWad: vi.fn(),
+      toWadTokenUnit: vi.fn(() => 1n),
+    }));
     vi.doMock('../../src/utils/logger.ts', () => ({
       log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
     }));

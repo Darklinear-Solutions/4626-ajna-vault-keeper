@@ -91,6 +91,7 @@ describe('arkRun aborts on nested transaction failure', () => {
     }));
     vi.doMock('../../src/utils/decimalConversion.ts', () => ({
       toWad: vi.fn((amount: bigint) => amount),
+      toWadTokenUnit: vi.fn(() => 1n),
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({ log }));
     vi.doMock('../../src/utils/chainTime.ts', () => ({
@@ -156,6 +157,7 @@ describe('arkRun aborts on nested transaction failure', () => {
     }));
     vi.doMock('../../src/utils/decimalConversion.ts', () => ({
       toWad: vi.fn((amount: bigint) => amount),
+      toWadTokenUnit: vi.fn(() => 1n),
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({ log }));
     vi.doMock('../../src/utils/chainTime.ts', () => ({
@@ -214,6 +216,7 @@ describe('arkRun aborts on nested transaction failure', () => {
     }));
     vi.doMock('../../src/utils/decimalConversion.ts', () => ({
       toWad: vi.fn((amount: bigint) => amount),
+      toWadTokenUnit: vi.fn(() => 1n),
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({ log }));
     vi.doMock('../../src/utils/chainTime.ts', () => ({

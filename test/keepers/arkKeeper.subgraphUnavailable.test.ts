@@ -88,6 +88,7 @@ describe('arkRun aborts cleanly when the subgraph is unavailable', () => {
     }));
     vi.doMock('../../src/utils/decimalConversion.ts', () => ({
       toWad: vi.fn((amount: bigint) => amount),
+      toWadTokenUnit: vi.fn(() => 1n),
     }));
     vi.doMock('../../src/utils/logger.ts', () => ({ log }));
 

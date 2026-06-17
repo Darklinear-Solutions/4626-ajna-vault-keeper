@@ -602,6 +602,39 @@ describe('metavaultRun orchestration', () => {
     );
   });
 
+  it('does not count sub-token-unit WAD bucket legs as metavault pre-move coverage', async () => {
+    const SIX_DEC = 10n ** 6n;
+    const WAD = 10n ** 18n;
+    const TOKEN_UNIT_WAD = 10n ** 12n;
+    const arkA = buildVaultFixture(ARK_A, { rate: 100n, assetDecimals: 6 });
+    const arkB = buildVaultFixture(ARK_B, { rate: 200n, assetDecimals: 6 });
+    const subTokenLeg = TOKEN_UNIT_WAD - 1n;
+
+    const { metavaultRun, selectBuckets, handleTransaction, reallocate } =
+      await setupMetavaultRunTest({
+        balances: {
+          [BUFFER]: 400n * SIX_DEC,
+          [ARK_A]: 300n * SIX_DEC,
+          [ARK_B]: 300n * SIX_DEC,
+        },
+        totalAssets: 1000n * SIX_DEC,
+        bucketPlan: [
+          { bucket: 4149n, amount: subTokenLeg },
+          { bucket: 4150n, amount: 100n * WAD - subTokenLeg },
+        ],
+        evaluations: [],
+        vaults: { [ARK_A]: arkA, [ARK_B]: arkB },
+      });
+
+    await metavaultRun();
+
+    expect(selectBuckets).toHaveBeenCalledWith(arkA, 100n * WAD);
+    expect(arkA.drain).not.toHaveBeenCalled();
+    expect(arkA.moveToBuffer).not.toHaveBeenCalled();
+    expect(handleTransaction).not.toHaveBeenCalled();
+    expect(reallocate).not.toHaveBeenCalled();
+  });
+
   // Regression: _executeMoveToBufferCalls validates all decreasing ARKs' bucket plans in pass 1
   // before any drain/moveToBuffer fires in pass 2. A future refactor that interleaves
   // drain+moveToBuffer with the per-ARK coverage check would let an earlier ARK fully execute its
