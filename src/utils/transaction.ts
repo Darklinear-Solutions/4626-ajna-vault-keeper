@@ -53,6 +53,7 @@ export async function wait(
         to: tx.to!,
         account: tx.from,
         data: tx.input,
+        blockNumber: receipt.blockNumber,
       });
     } catch (err: any) {
       const data = getRevertData(err);
@@ -78,7 +79,7 @@ export async function wait(
           try {
             decoded = decodeErrorResult({ abi: getAbi('vault'), data });
           } catch {
-            decoded = { errorName: 'UnknownRevert', sig: data.slice(0, 10), data };
+            decoded = { errorName: errorName ?? 'UnknownRevert', sig: data.slice(0, 10), data };
           }
         }
         throw Object.assign(new Error(String(decoded.errorName)), { receipt, decoded, cause: err });

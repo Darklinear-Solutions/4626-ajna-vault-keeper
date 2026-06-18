@@ -30,55 +30,15 @@ import {
   _buildFinalAllocations,
   _rebalanceBuffer,
   _reallocateForRates,
-  ACCRUAL_PAD_BPS,
   type Ark,
   type ArkAllocation,
   type BufferAllocation,
 } from '../../../src/metavault/planner';
 
-// Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: the pad is bounded by the
-// planned decrease so the submitted target never exceeds realInitialAssets (which would invert
-// the entry into a supply branch and trip Euler's totalWithdrawn == totalSupplied invariant).
-const accrualPad = (realInitialAssets: bigint, decrease: bigint) => {
-  const bps = (realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
-  return bps < decrease ? bps : decrease;
-};
-
-const effectiveWithdrawal = (realInitialAssets: bigint, decrease: bigint) =>
-  decrease - accrualPad(realInitialAssets, decrease);
-
-const simulateEulerAccounting = (
-  allocations: Array<{ id: Address; assets: bigint }>,
-  balances: Array<{ id: Address; realInitialAssets: bigint }>,
-) => {
-  let totalWithdrawn = 0n;
-  let totalSupplied = 0n;
-  const balanceById = new Map(balances.map((entry) => [entry.id, entry.realInitialAssets]));
-
-  for (const allocation of allocations) {
-    const supplyAssets = balanceById.get(allocation.id) ?? 0n;
-    const withdrawn = supplyAssets > allocation.assets ? supplyAssets - allocation.assets : 0n;
-    if (withdrawn > 0n) {
-      totalWithdrawn += withdrawn;
-      continue;
-    }
-
-    const supplied =
-      allocation.assets === maxUint256
-        ? totalWithdrawn > totalSupplied
-          ? totalWithdrawn - totalSupplied
-          : 0n
-        : allocation.assets > supplyAssets
-          ? allocation.assets - supplyAssets
-          : 0n;
-    totalSupplied += supplied;
-  }
-
-  return { totalWithdrawn, totalSupplied };
-};
 import { evaluateRates } from '../../../src/metavault/utils/evaluateRates';
 import { type Address, maxUint256 } from 'viem';
 import { type createVault } from '../../../src/ark/vault';
+import { accrualPad, effectiveWithdrawal, simulateEulerAccounting } from '../../helpers/eulerModel';
 
 const S = 1_000_000n;
 const ADDRESSES = [

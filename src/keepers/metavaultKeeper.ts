@@ -1,6 +1,7 @@
 import { config, resolveArkSettings } from '../utils/config.ts';
 import { createVault } from '../ark/vault.ts';
 import { isArkHalted } from './arkKeeper.ts';
+import { RunAbortError } from './runAbort.ts';
 import { evaluateRates } from '../metavault/utils/evaluateRates.ts';
 import {
   getExpectedSupplyAssets,
@@ -28,18 +29,6 @@ import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
 import { selectBuckets, type BucketMove } from '../ark/utils/selectBuckets.ts';
 import { toWad, toWadTokenUnit } from '../utils/decimalConversion.ts';
 import { type Address } from 'viem';
-
-export {
-  ACCRUAL_PAD_BPS,
-  _buildFinalAllocations,
-  _isRateReallocationRequired,
-  _rebalanceBuffer,
-  _reallocateForRates,
-  _validateAllocations,
-  type Ark,
-  type ArkAllocation,
-  type BufferAllocation,
-} from '../metavault/planner.ts';
 
 type RuntimeVault = ReturnType<typeof createVault>;
 
@@ -83,10 +72,10 @@ export async function metavaultRun() {
     }
 
     const validationError = _validateAllocations(arkAllocations, bufferAllocation, totalAssets);
-    if (validationError) return _logRunExit(validationError);
+    if (validationError) return abortRun(validationError);
 
     const preview = _buildFinalAllocations(arkAllocations, bufferAllocation);
-    if (typeof preview === 'string') return _logRunExit(preview);
+    if (typeof preview === 'string') return abortRun(preview);
 
     if (preview.length === 0) {
       return log.info(
@@ -100,17 +89,17 @@ export async function metavaultRun() {
     await _refreshRealInitialAssets(arkAllocations, bufferAllocation);
 
     const allocations = _buildFinalAllocations(arkAllocations, bufferAllocation);
-    if (typeof allocations === 'string') return _logRunExit(allocations);
+    if (typeof allocations === 'string') return abortRun(allocations);
 
     const unpreparedArk = _findUnpreparedArkWithdrawal(allocations, arkAllocations, preparedArks);
     if (unpreparedArk) {
-      return _logRunExit(`ark ${unpreparedArk} has a withdrawal target without a prepared buffer`);
+      return abortRun(`ark ${unpreparedArk} has a withdrawal target without a prepared buffer`);
     }
 
     const reallocateTx = await handleTransaction(reallocate(allocations, config.defaultGas), {
       action: 'reallocate',
     });
-    if (!reallocateTx.status) return _logRunExit('reallocate failed');
+    if (!reallocateTx.status) return abortRun('reallocate failed');
 
     log.info({ event: 'metavault_run_complete', allocations }, 'metavault run complete');
   } catch (e) {
@@ -205,7 +194,7 @@ async function _executeMoveToBufferCalls(
 
     const plannedCoverage = bucketPlan.reduce((sum, p) => sum + p.amount, 0n);
     if (plannedCoverage < amountToMoveWad) {
-      return _logRunExit(
+      return abortRun(
         `bucket plan for ark ${ark.id} covers ${plannedCoverage} of planned decrease ${amountToMoveWad}`,
       );
     }
@@ -220,7 +209,7 @@ async function _executeMoveToBufferCalls(
         bucket,
         ark: ark.id,
       });
-      if (!drainTx.status) return _logRunExit(`drain failed for ark ${ark.id}`);
+      if (!drainTx.status) return abortRun(`drain failed for ark ${ark.id}`);
 
       const gas = await getGasWithBuffer('vault', 'moveToBuffer', [bucket, amount], ark.id);
       const moveTx = await handleTransaction(ark.vault.moveToBuffer(bucket, amount, gas), {
@@ -230,7 +219,7 @@ async function _executeMoveToBufferCalls(
         ark: ark.id,
       });
 
-      if (!moveTx.status) return _logRunExit(`moveToBuffer failed for ark ${ark.id}`);
+      if (!moveTx.status) return abortRun(`moveToBuffer failed for ark ${ark.id}`);
     }
     preparedArks.add(ark.id);
   }
@@ -258,9 +247,7 @@ async function _refreshRealInitialAssets(
 
 // ============= Helpers =============
 
-class RunAbortError extends Error {}
-
-function _logRunExit(reason: string): never {
+function abortRun(reason: string): never {
   log.error({ event: 'metavault_run_aborted', reason }, `metavault run aborted: ${reason}`);
   throw new RunAbortError(reason);
 }

@@ -1,20 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { maxUint256, type Address } from 'viem';
-import { ACCRUAL_PAD_BPS } from '../../src/metavault/planner';
-
-// Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: never exceeds the planned
-// decrease, otherwise the submitted target would invert into a supply branch at Euler.
-//
-// ACCRUAL_PAD_BPS (5 bps) was chosen to cover interest accrual between the keeper's pre-reallocate
-// refresh read and the reallocate transaction mining. In the unclamped regime (|delta| ≥
-// realInitialAssets * 5/10000), the pad gives >10x headroom against accrual at 50% APR over 2
-// blocks (12s each). In the clamped regime (|delta| < that threshold), the pad collapses to
-// |delta| and any remaining accrual headroom is sacrificed to keep the target ≤ realInitialAssets
-// — accepted as the safer trade-off than risking a supply-branch inversion at Euler.
-const accrualPad = (realInitialAssets: bigint, decrease: bigint) => {
-  const bps = (realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
-  return bps < decrease ? bps : decrease;
-};
+import { accrualPad } from '../helpers/eulerModel';
 
 const BUFFER = '0x00000000000000000000000000000000000000ff' as Address;
 const ARK_A = '0x00000000000000000000000000000000000000a1' as Address;

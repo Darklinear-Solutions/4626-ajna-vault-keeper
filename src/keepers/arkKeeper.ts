@@ -9,6 +9,7 @@ import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth
 import { createVault } from '../ark/vault.ts';
 import { getChainTime, ChainTimeUnavailableError } from '../utils/chainTime.ts';
 import { AJNA_MAX_FENWICK_INDEX } from '../ajna/constants.ts';
+import { RunAbortError } from './runAbort.ts';
 import { type Address } from 'viem';
 
 const haltedArks = new Set<Address>();
@@ -35,10 +36,9 @@ type PriceData = {
 };
 
 type MoveOperation = {
-  from: bigint | 'Buffer';
+  from: bigint;
   to: bigint | 'Buffer';
   amount: bigint;
-  bucketIndex?: number;
 };
 
 // ============= Main Run Function =============
@@ -53,10 +53,9 @@ export async function arkRun(
   _moveStats = { attempted: 0, succeeded: 0 };
 
   try {
-    if (isCurrentArkHalted()) return _logRunExit('keeper halted');
-    if (await vault.isPaused()) return _logRunExit('vault is currently paused');
-    if (await poolHasBadDebt(vault, _settings.maxAuctionAge))
-      return _logRunExit('pool has bad debt');
+    if (isCurrentArkHalted()) return abortRun('keeper halted');
+    if (await vault.isPaused()) return abortRun('vault is currently paused');
+    if (await poolHasBadDebt(vault, _settings.maxAuctionAge)) return abortRun('pool has bad debt');
 
     const gas = await getGasWithBuffer('pool', 'updateInterest', [], await vault.getPoolAddress());
     const vaultAddress = vault.getAddress();
@@ -64,7 +63,7 @@ export async function arkRun(
       action: 'updateInterest',
       ark: vaultAddress,
     });
-    if (!updateInterestTx.status) _logRunExit(`updateInterest failed for ark ${vaultAddress}`);
+    if (!updateInterestTx.status) abortRun(`updateInterest failed for ark ${vaultAddress}`);
 
     const data = await _getKeeperData();
     const drainTx = await handleTransaction(vault.drain(data.optimalBucket), {
@@ -72,18 +71,18 @@ export async function arkRun(
       bucket: data.optimalBucket,
       ark: vaultAddress,
     });
-    if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
+    if (!drainTx.status) return abortRun(`drain failed for ark ${vaultAddress}`);
 
     if (!(await isOptimalBucketInRange(data)))
-      return _logRunExit('optimal bucket is not in interest-earning range');
-    if (await isOptimalBucketDusty(data)) return _logRunExit('optimal bucket is dusty');
+      return abortRun('optimal bucket is not in interest-earning range');
+    if (await isOptimalBucketDusty(data)) return abortRun('optimal bucket is dusty');
 
     const nowSec = await getChainTime();
     if (await isOptimalBucketRecentlyBankrupt(data, nowSec))
-      return _logRunExit('optimal bucket was recently bankrupt');
+      return abortRun('optimal bucket was recently bankrupt');
     if (await vault.isBucketDebtLocked(data.optimalBucket))
-      return _logRunExit('optimal bucket debt is locked due to pending auction');
-    if (await optimalBucketHasCollateral(data)) return _logRunExit('optimal bucket has collateral');
+      return abortRun('optimal bucket debt is locked due to pending auction');
+    if (await optimalBucketHasCollateral(data)) return abortRun('optimal bucket has collateral');
 
     await rebalanceBuckets(data);
     await rebalanceBuffer(data);
@@ -123,13 +122,13 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
       bucket,
       ark: vaultAddress,
     });
-    if (!drainTx.status) _logRunExit(`drain failed for ark ${vaultAddress}`);
+    if (!drainTx.status) abortRun(`drain failed for ark ${vaultAddress}`);
 
     const bucketValue = await vault.lpToValue(bucket);
     const amountToMove = await poolBalanceCapWad(bucketValue, vault);
     if (await shouldSkipBucket(bucket, amountToMove, data)) continue;
 
-    const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data, i);
+    const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data);
 
     for (const op of operations) {
       const txData = await executeMoveOperation(op, data);
@@ -170,7 +169,6 @@ function planBucketOperations(
   amountToMove: bigint,
   bufferNeeded: bigint,
   data: KeeperRunData,
-  bucketIndex: number,
 ): MoveOperation[] {
   const operations: MoveOperation[] = [];
   const bufferAmount = bufferNeeded < amountToMove ? bufferNeeded : amountToMove;
@@ -180,27 +178,23 @@ function planBucketOperations(
       from: bucket,
       to: data.optimalBucket,
       amount: amountToMove,
-      bucketIndex,
     });
   } else if (bufferAmount === amountToMove) {
     operations.push({
       from: bucket,
       to: 'Buffer',
       amount: amountToMove,
-      bucketIndex,
     });
   } else {
     operations.push({
       from: bucket,
       to: 'Buffer',
       amount: bufferAmount,
-      bucketIndex,
     });
     operations.push({
       from: bucket,
       to: data.optimalBucket,
       amount: amountToMove - bufferAmount,
-      bucketIndex,
     });
   }
 
@@ -214,48 +208,46 @@ async function executeMoveOperation(
   data: KeeperRunData,
 ): Promise<TransactionData | undefined> {
   if (isCurrentArkHalted()) return;
-  if ((op.from === 'Buffer' || op.to === 'Buffer') && op.amount < data.assetUnitWad) return;
-  if (op.from === 'Buffer') {
-    const gas = await getGasWithBuffer(
-      'vault',
-      'moveFromBuffer',
-      [op.to, op.amount],
-      vault.getAddress(),
-    );
-    return await _executeMoveTransaction(vault.moveFromBuffer(op.to as bigint, op.amount, gas), {
-      action: 'moveFromBuffer',
-      to: op.to,
-      amount: op.amount,
-      ark: vault.getAddress(),
-    });
-  } else if (op.to === 'Buffer') {
-    const gas = await getGasWithBuffer(
-      'vault',
-      'moveToBuffer',
-      [op.from, op.amount],
-      vault.getAddress(),
-    );
-    return await _executeMoveTransaction(vault.moveToBuffer(op.from, op.amount, gas), {
-      action: 'moveToBuffer',
-      from: op.from,
-      amount: op.amount,
-      ark: vault.getAddress(),
-    });
-  } else {
-    const gas = await getGasWithBuffer(
-      'vault',
-      'move',
-      [op.from, op.to, op.amount],
-      vault.getAddress(),
-    );
-    return await _executeMoveTransaction(vault.move(op.from, op.to, op.amount, gas), {
-      action: 'move',
-      from: op.from,
-      to: op.to,
-      amount: op.amount,
-      ark: vault.getAddress(),
-    });
+  if (op.to === 'Buffer') {
+    return executeBufferTransfer('moveToBuffer', op.from, op.amount, data);
   }
+
+  const gas = await getGasWithBuffer(
+    'vault',
+    'move',
+    [op.from, op.to, op.amount],
+    vault.getAddress(),
+  );
+  return _executeMoveTransaction(vault.move(op.from, op.to, op.amount, gas), {
+    action: 'move',
+    from: op.from,
+    to: op.to,
+    amount: op.amount,
+    ark: vault.getAddress(),
+  });
+}
+
+async function executeBufferTransfer(
+  kind: 'moveToBuffer' | 'moveFromBuffer',
+  bucket: bigint,
+  amount: bigint,
+  data: KeeperRunData,
+): Promise<TransactionData | undefined> {
+  if (isCurrentArkHalted()) return;
+  if (amount < data.assetUnitWad) return;
+
+  const ark = vault.getAddress();
+  const gas = await getGasWithBuffer('vault', kind, [bucket, amount], ark);
+  const tx =
+    kind === 'moveToBuffer'
+      ? vault.moveToBuffer(bucket, amount, gas)
+      : vault.moveFromBuffer(bucket, amount, gas);
+  const context =
+    kind === 'moveToBuffer'
+      ? { action: kind, from: bucket, amount, ark }
+      : { action: kind, to: bucket, amount, ark };
+
+  return _executeMoveTransaction(tx, context);
 }
 
 async function _executeMoveTransaction(
@@ -281,21 +273,9 @@ async function moveExcessFromBuffer(
     bucket: targetBucket,
     ark: vaultAddress,
   });
-  if (!drainTx.status) _logRunExit(`drain failed for ark ${vaultAddress}`);
+  if (!drainTx.status) abortRun(`drain failed for ark ${vaultAddress}`);
 
-  const gas = await getGasWithBuffer(
-    'vault',
-    'moveFromBuffer',
-    [targetBucket, amount],
-    vaultAddress,
-  );
-
-  await _executeMoveTransaction(vault.moveFromBuffer(targetBucket, amount, gas), {
-    action: 'moveFromBuffer',
-    to: targetBucket,
-    amount: amount,
-    ark: vaultAddress,
-  });
+  await executeBufferTransfer('moveFromBuffer', targetBucket, amount, data);
 }
 
 async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<void> {
@@ -312,7 +292,7 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       bucket,
       ark: vaultAddress,
     });
-    if (!drainTx.status) _logRunExit(`drain failed for ark ${vaultAddress}`);
+    if (!drainTx.status) abortRun(`drain failed for ark ${vaultAddress}`);
 
     const bucketValue = await vault.lpToValue(bucket);
 
@@ -322,22 +302,10 @@ async function fillBufferDeficit(needed: bigint, data: KeeperRunData): Promise<v
       bucketValue >= remaining ? remaining : bucketValue,
       vault,
     );
-    if (amountToMove < data.assetUnitWad) continue;
 
-    const gas = await getGasWithBuffer(
-      'vault',
-      'moveToBuffer',
-      [bucket, amountToMove],
-      vaultAddress,
-    );
-    const txData = await _executeMoveTransaction(vault.moveToBuffer(bucket, amountToMove, gas), {
-      action: 'moveToBuffer',
-      from: bucket,
-      amount: amountToMove,
-      ark: vaultAddress,
-    });
+    const txData = await executeBufferTransfer('moveToBuffer', bucket, amountToMove, data);
 
-    if (txData?.status) remaining -= txData?.assets;
+    if (txData?.status) remaining -= txData.assets;
   }
 }
 
@@ -423,7 +391,7 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
       ark: vaultAddress,
     });
 
-    if (!drainTx.status) return _logRunExit(`drain failed for ark ${vaultAddress}`);
+    if (!drainTx.status) return abortRun(`drain failed for ark ${vaultAddress}`);
   }
 
   const [optimalBucket, buckets, bufferTarget, assetDecimals] = await Promise.all([
@@ -452,7 +420,7 @@ export async function _calculateOptimalBucket(price: bigint): Promise<bigint> {
   const currentPriceIndex = await vault.getPriceToIndex(price);
   const optimalBucket = currentPriceIndex + _settings.optimalBucketDiff;
   if (optimalBucket === 0n || optimalBucket > AJNA_MAX_FENWICK_INDEX) {
-    return _logRunExit('optimal bucket is outside Ajna bucket range');
+    return abortRun('optimal bucket is outside Ajna bucket range');
   }
   return optimalBucket;
 }
@@ -546,9 +514,7 @@ function isCurrentArkHalted(): boolean {
 
 // ============= Logging =============
 
-class RunAbortError extends Error {}
-
-function _logRunExit(reason: string): never {
+function abortRun(reason: string): never {
   log.error(
     { event: 'ark_run_aborted', ark: vault.getAddress(), reason },
     `ark run aborted for ark ${vault.getAddress()}`,

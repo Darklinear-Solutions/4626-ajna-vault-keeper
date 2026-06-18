@@ -114,26 +114,11 @@ function safeOrigin(rawUrl: string | undefined): string | undefined {
   }
 }
 
-export function _filterAuctions(
-  response: GetUnsettledAuctionsResponse,
+export function isPastAuctionAge(
+  kickTime: bigint,
   nowSec: bigint,
   maxAuctionAge?: number,
-): LiquidationAuction[] {
-  const unsettledAuctions = response.liquidationAuctions;
-  const auctionsBeforeCutoff: LiquidationAuction[] = [];
-
-  for (let i = 0; i < unsettledAuctions.length; i++) {
-    const kickTime = BigInt(unsettledAuctions[i]!.kickTime);
-
-    if (isPastAuctionAge(kickTime, nowSec, maxAuctionAge)) {
-      auctionsBeforeCutoff.push(unsettledAuctions[i]!);
-    }
-  }
-
-  return auctionsBeforeCutoff;
-}
-
-function isPastAuctionAge(kickTime: bigint, nowSec: bigint, maxAuctionAge?: number): boolean {
+): boolean {
   const maxAge = maxAuctionAge ?? config.arkGlobal.maxAuctionAge;
   if (maxAge === 0) return true;
   return nowSec - kickTime > BigInt(maxAge);

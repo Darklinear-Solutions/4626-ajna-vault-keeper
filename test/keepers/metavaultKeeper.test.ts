@@ -5,51 +5,15 @@ import {
   _rebalanceBuffer,
   _reallocateForRates,
   _buildFinalAllocations,
-  ACCRUAL_PAD_BPS,
   type ArkAllocation,
   type BufferAllocation,
   type MarketAllocation,
 } from '../../src/metavault/planner';
 
-// Mirrors the clamped pad in metavaultKeeper._buildFinalAllocations: never exceeds the planned
-// decrease, otherwise the submitted target would invert into a supply branch at Euler.
-const accrualPad = (realInitialAssets: bigint, decrease: bigint) => {
-  const bps = (realInitialAssets * ACCRUAL_PAD_BPS) / 10000n;
-  return bps < decrease ? bps : decrease;
-};
-
-const simulateEulerAccounting = (
-  allocations: MarketAllocation[],
-  balances: Array<{ id: Address; realInitialAssets: bigint }>,
-) => {
-  let totalWithdrawn = 0n;
-  let totalSupplied = 0n;
-  const balanceById = new Map(balances.map((entry) => [entry.id, entry.realInitialAssets]));
-
-  for (const allocation of allocations) {
-    const supplyAssets = balanceById.get(allocation.id) ?? 0n;
-    const withdrawn = supplyAssets > allocation.assets ? supplyAssets - allocation.assets : 0n;
-    if (withdrawn > 0n) {
-      totalWithdrawn += withdrawn;
-      continue;
-    }
-
-    const supplied =
-      allocation.assets === maxUint256
-        ? totalWithdrawn > totalSupplied
-          ? totalWithdrawn - totalSupplied
-          : 0n
-        : allocation.assets > supplyAssets
-          ? allocation.assets - supplyAssets
-          : 0n;
-    totalSupplied += supplied;
-  }
-
-  return { totalWithdrawn, totalSupplied };
-};
 import { evaluateRates, type ArkEvaluation } from '../../src/metavault/utils/evaluateRates';
 import { type createVault } from '../../src/ark/vault';
 import { type Address, maxUint256 } from 'viem';
+import { accrualPad, simulateEulerAccounting } from '../helpers/eulerModel';
 
 vi.mock('../../src/utils/config', () => ({
   config: {

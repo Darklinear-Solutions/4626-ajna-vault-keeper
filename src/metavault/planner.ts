@@ -255,15 +255,10 @@ export function _buildFinalAllocations(
   }
 
   const withTargets = all.map((a) => {
-    const base = a.realInitialAssets + a.delta;
-    let pad = 0n;
-    if (a.delta < 0n) {
-      const decrease = -a.delta;
-      pad = _accrualPad(a.realInitialAssets, decrease);
-    }
-    const finalTarget = base + pad;
     const effectiveWithdrawn =
-      a.delta < 0n && a.realInitialAssets > finalTarget ? a.realInitialAssets - finalTarget : 0n;
+      a.delta < 0n ? _effectiveWithdrawal(a.realInitialAssets, -a.delta) : 0n;
+    const finalTarget =
+      a.delta < 0n ? a.realInitialAssets - effectiveWithdrawn : a.realInitialAssets + a.delta;
     return {
       id: a.id,
       delta: a.delta,
@@ -308,7 +303,7 @@ export function _buildFinalAllocations(
     return `supply cap exceeded for ${simulated.capExceeded.id}: final assets ${simulated.capExceeded.finalAssets} > cap ${simulated.capExceeded.supplyCap}`;
   }
   if (simulated.totalWithdrawn !== simulated.totalSupplied) {
-    return `inconsistent reallocation: totalWithdrawn (${simulated.totalWithdrawn}) != totalSupplied (${simulated.totalSupplied})`;
+    return `simulated reallocation is unbalanced: totalWithdrawn (${simulated.totalWithdrawn}) != totalSupplied (${simulated.totalSupplied})`;
   }
 
   return ordered;
@@ -357,26 +352,10 @@ function _simulateEulerReallocationAccounting(
   return { totalWithdrawn, totalSupplied };
 }
 
-function receivableCapacity(allocation: SupplyCappedAllocation, maxAssets: bigint): bigint {
-  if (allocation.assets >= maxAssets) return 0n;
-  return min(maxAssets - allocation.assets, remainingSupplyCapacity(allocation));
-}
-
-function remainingSupplyCapacity(allocation: SupplyCappedAllocation): bigint {
-  const neutralIncrease =
-    allocation.assets < allocation.initialAssets
-      ? allocation.initialAssets - allocation.assets
-      : 0n;
-  const plannedSupply =
-    allocation.assets > allocation.initialAssets
-      ? allocation.assets - allocation.initialAssets
-      : 0n;
-  const capSupply =
-    allocation.supplyCap > allocation.realInitialAssets
-      ? allocation.supplyCap - allocation.realInitialAssets
-      : 0n;
-
-  return neutralIncrease + (capSupply > plannedSupply ? capSupply - plannedSupply : 0n);
+function capHeadroom(allocation: SupplyCappedAllocation): bigint {
+  return allocation.supplyCap > allocation.realInitialAssets
+    ? allocation.supplyCap - allocation.realInitialAssets
+    : 0n;
 }
 
 function plannedSupply(allocation: SupplyCappedAllocation): bigint {
@@ -385,16 +364,23 @@ function plannedSupply(allocation: SupplyCappedAllocation): bigint {
     : 0n;
 }
 
+function remainingSupplyCapacity(allocation: SupplyCappedAllocation): bigint {
+  const ceiling = allocation.initialAssets + capHeadroom(allocation);
+  return ceiling > allocation.assets ? ceiling - allocation.assets : 0n;
+}
+
+function receivableCapacity(allocation: SupplyCappedAllocation, maxAssets: bigint): bigint {
+  const room = maxAssets > allocation.assets ? maxAssets - allocation.assets : 0n;
+  return min(room, remainingSupplyCapacity(allocation));
+}
+
 function supplyCapErrorMessage(
   label: 'Ark' | 'Buffer',
   id: Address,
   allocation: SupplyCappedAllocation,
 ): string | null {
   const supply = plannedSupply(allocation);
-  const cap =
-    allocation.supplyCap > allocation.realInitialAssets
-      ? allocation.supplyCap - allocation.realInitialAssets
-      : 0n;
+  const cap = capHeadroom(allocation);
   return supply > cap
     ? `${label} ${id} planned supply ${supply} exceeds supply cap capacity ${cap}`
     : null;

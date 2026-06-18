@@ -139,10 +139,19 @@ export function resolveArkSettings(ark: ArkConfig): ResolvedArkSettings {
   };
 }
 
+type ResolvedOracleConfig = Omit<
+  RawConfig['oracle'],
+  'onchainMaxStaleness' | 'offchainMaxStaleness' | 'futureSkewTolerance'
+> & {
+  onchainMaxStaleness: number | null;
+  offchainMaxStaleness: number;
+  futureSkewTolerance: number;
+};
+
 export const config = {
   ...raw,
   keeper: raw.keeper as Required<RawConfig['keeper']>,
-  oracle: raw.oracle as Required<RawConfig['oracle']>,
+  oracle: raw.oracle as ResolvedOracleConfig,
   arkGlobal: raw.arkGlobal as Required<RawConfig['arkGlobal']>,
   transaction: raw.transaction as Required<RawConfig['transaction']>,
   remoteSigner: raw.remoteSigner as Required<NonNullable<RawConfig['remoteSigner']>>,
