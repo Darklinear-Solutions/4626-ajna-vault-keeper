@@ -87,10 +87,11 @@ async function setupArkRun(opts: SetupOptions) {
     getPrice: vi.fn().mockResolvedValue(100n),
   }));
   vi.doMock('../../src/ajna/utils/poolBalanceCap.ts', () => ({
-    poolBalanceCap: vi.fn(async (amount: bigint) => amount),
+    poolBalanceCapWad: vi.fn(async (amount: bigint) => amount),
   }));
   vi.doMock('../../src/utils/decimalConversion.ts', () => ({
     toWad: vi.fn((amount: bigint) => amount),
+    toWadTokenUnit: vi.fn(() => 1n),
   }));
   vi.doMock('../../src/utils/logger.ts', () => ({ log }));
   vi.doMock('../../src/utils/chainTime.ts', () => ({

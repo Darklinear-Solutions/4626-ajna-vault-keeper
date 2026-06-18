@@ -22,11 +22,11 @@ function makeVault() {
   };
 }
 
-// _filterAuctions cutoff is `auctionAge > maxAge` (strictly greater than). These
+// isPastAuctionAge cutoff is `auctionAge > maxAge` (strictly greater than). These
 // tests pin the boundary so a refactor cannot silently turn it into >= and start
 // flagging boundary-aged auctions as "stuck".
-describe('_filterAuctions cutoff boundary', () => {
-  async function loadFilter() {
+describe('isPastAuctionAge cutoff boundary', () => {
+  async function loadIsPastAuctionAge() {
     vi.doMock('../../src/utils/config', () => ({
       config: { arkGlobal: { maxAuctionAge: 1 } },
     }));
@@ -37,68 +37,48 @@ describe('_filterAuctions cutoff boundary', () => {
       getChainTime: vi.fn(),
     }));
     const mod = await import('../../src/subgraph/poolHealth');
-    return mod._filterAuctions;
-  }
-
-  function auction(kickTime: bigint) {
-    return { borrower: BORROWER, kickTime: String(kickTime) };
+    return mod.isPastAuctionAge;
   }
 
   it('excludes auctions whose age equals maxAge', async () => {
-    const _filterAuctions = await loadFilter();
+    const isPastAuctionAge = await loadIsPastAuctionAge();
     const nowSec = 1_700_000_000n;
     const maxAge = 100;
     const kickTime = nowSec - BigInt(maxAge);
 
-    const result = _filterAuctions({ liquidationAuctions: [auction(kickTime)] }, nowSec, maxAge);
-
-    expect(result).toEqual([]);
+    expect(isPastAuctionAge(kickTime, nowSec, maxAge)).toBe(false);
   });
 
   it('includes auctions whose age is one second past maxAge', async () => {
-    const _filterAuctions = await loadFilter();
+    const isPastAuctionAge = await loadIsPastAuctionAge();
     const nowSec = 1_700_000_000n;
     const maxAge = 100;
     const kickTime = nowSec - BigInt(maxAge) - 1n;
 
-    const result = _filterAuctions({ liquidationAuctions: [auction(kickTime)] }, nowSec, maxAge);
-
-    expect(result).toHaveLength(1);
-    expect(result[0]?.kickTime).toBe(String(kickTime));
+    expect(isPastAuctionAge(kickTime, nowSec, maxAge)).toBe(true);
   });
 
   it('excludes auctions kicked in the future (kickTime > nowSec)', async () => {
-    const _filterAuctions = await loadFilter();
+    const isPastAuctionAge = await loadIsPastAuctionAge();
     const nowSec = 1_700_000_000n;
     const kickTime = nowSec + 50n;
 
-    const result = _filterAuctions({ liquidationAuctions: [auction(kickTime)] }, nowSec, 100);
-
-    expect(result).toEqual([]);
+    expect(isPastAuctionAge(kickTime, nowSec, 100)).toBe(false);
   });
 
   it('excludes auctions with kickTime exactly equal to nowSec (age 0)', async () => {
-    const _filterAuctions = await loadFilter();
+    const isPastAuctionAge = await loadIsPastAuctionAge();
     const nowSec = 1_700_000_000n;
 
-    const result = _filterAuctions({ liquidationAuctions: [auction(nowSec)] }, nowSec, 100);
-
-    expect(result).toEqual([]);
+    expect(isPastAuctionAge(nowSec, nowSec, 100)).toBe(false);
   });
 
-  it('returns every auction when maxAge is 0 regardless of nowSec', async () => {
-    const _filterAuctions = await loadFilter();
+  it('returns true for every auction when maxAge is 0 regardless of nowSec', async () => {
+    const isPastAuctionAge = await loadIsPastAuctionAge();
     const nowSec = 1_700_000_000n;
 
-    const result = _filterAuctions(
-      {
-        liquidationAuctions: [auction(nowSec - 10n), auction(nowSec + 10n)],
-      },
-      nowSec,
-      0,
-    );
-
-    expect(result).toHaveLength(2);
+    expect(isPastAuctionAge(nowSec - 10n, nowSec, 0)).toBe(true);
+    expect(isPastAuctionAge(nowSec + 10n, nowSec, 0)).toBe(true);
   });
 });
 
@@ -132,7 +112,7 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
     return await import('../../src/subgraph/poolHealth');
   }
 
-  it('flags bad debt when chain time puts the auction past the cutoff even if Date.now would not', async () => {
+  it('flags stale active debt when chain time puts the auction past the cutoff even if Date.now would not', async () => {
     const chainTimeSec = 1_700_000_700n;
     const dateNowSec = 1_700_000_000n;
     const kickTimeSec = 1_700_000_050n;
@@ -146,7 +126,7 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
       });
 
       const vault = makeVault();
-      vault.getAuctionStatus.mockResolvedValue([1n, 0n, 1n]);
+      vault.getAuctionStatus.mockResolvedValue([kickTimeSec, 1n, 1n]);
 
       await expect(poolHasBadDebt(vault)).resolves.toBe(true);
       expect(vault.getAuctionStatus).toHaveBeenCalledExactlyOnceWith(BORROWER);
@@ -155,7 +135,7 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
     }
   });
 
-  it('does not flag bad debt when chain time leaves the auction inside the cutoff even if Date.now would', async () => {
+  it('does not flag collateralized active debt when chain time leaves the auction inside the cutoff even if Date.now would', async () => {
     const chainTimeSec = 1_700_000_100n;
     const dateNowSec = 1_700_000_900n;
     const kickTimeSec = 1_700_000_050n;
@@ -169,11 +149,45 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
       });
 
       const vault = makeVault();
+      vault.getAuctionStatus.mockResolvedValue([kickTimeSec, 1n, 1n]);
 
       await expect(poolHasBadDebt(vault)).resolves.toBe(false);
-      expect(vault.getAuctionStatus).not.toHaveBeenCalled();
+      expect(vault.getAuctionStatus).toHaveBeenCalledExactlyOnceWith(BORROWER);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('flags zero-collateral bad debt even when the auction is inside the cutoff', async () => {
+    const chainTimeSec = 1_700_000_100n;
+    const kickTimeSec = 1_700_000_050n;
+
+    const { poolHasBadDebt } = await loadPoolHealth({
+      chainTimeSec,
+      auctions: [{ borrower: BORROWER, kickTime: String(kickTimeSec) }],
+    });
+
+    const vault = makeVault();
+    vault.getAuctionStatus.mockResolvedValue([kickTimeSec, 0n, 1n]);
+
+    await expect(poolHasBadDebt(vault)).resolves.toBe(true);
+    expect(vault.getAuctionStatus).toHaveBeenCalledExactlyOnceWith(BORROWER);
+  });
+
+  it('uses onchain kickTime for the stale active debt cutoff', async () => {
+    const chainTimeSec = 1_700_000_700n;
+    const subgraphKickTimeSec = 1_700_000_000n;
+    const onchainKickTimeSec = 1_700_000_650n;
+
+    const { poolHasBadDebt } = await loadPoolHealth({
+      chainTimeSec,
+      auctions: [{ borrower: BORROWER, kickTime: String(subgraphKickTimeSec) }],
+    });
+
+    const vault = makeVault();
+    vault.getAuctionStatus.mockResolvedValue([onchainKickTimeSec, 1n, 1n]);
+
+    await expect(poolHasBadDebt(vault)).resolves.toBe(false);
+    expect(vault.getAuctionStatus).toHaveBeenCalledExactlyOnceWith(BORROWER);
   });
 });

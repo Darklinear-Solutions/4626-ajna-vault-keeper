@@ -6,7 +6,7 @@ vi.mock('../../../src/utils/config', () => ({
 }));
 
 import { evaluateRates } from '../../../src/metavault/utils/evaluateRates';
-import { type Ark } from '../../../src/keepers/metavaultKeeper';
+import { type Ark } from '../../../src/metavault/planner';
 import { type Address } from 'viem';
 import { type createVault } from '../../../src/ark/vault';
 

@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
-import { metavaultRun, ACCRUAL_PAD_BPS } from '../../src/keepers/metavaultKeeper';
+import { metavaultRun } from '../../src/keepers/metavaultKeeper';
+import { ACCRUAL_PAD_BPS } from '../../src/metavault/planner';
 import { arkRun } from '../../src/keepers/arkKeeper';
 import {
   getExpectedSupplyAssets,

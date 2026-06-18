@@ -14,6 +14,8 @@ type LiquidationAuction = {
   kickTime: string;
 };
 
+const AUCTION_PAGE_SIZE = 1000;
+
 type VaultLike = {
   getAddress: () => Address | undefined;
   getPoolAddress: () => Promise<Address>;
@@ -30,14 +32,19 @@ export class SubgraphUnavailableError extends Error {
 export async function poolHasBadDebt(vault: VaultLike, maxAuctionAge?: number): Promise<boolean> {
   const auctions = await _getUnsettledAuctions(vault);
   const nowSec = await getChainTime();
-  const auctionsBeforeCutoff = _filterAuctions(auctions, nowSec, maxAuctionAge);
 
-  for (let i = 0; i < auctionsBeforeCutoff.length; i++) {
+  for (let i = 0; i < auctions.liquidationAuctions.length; i++) {
+    const borrower = auctions.liquidationAuctions[i]!.borrower;
     const [kickTime, collateralRemaining, debtRemaining] = await vault.getAuctionStatus(
-      auctionsBeforeCutoff[i]!.borrower as Address,
+      borrower as Address,
     );
+    const activeDebtAuction = kickTime !== 0n && debtRemaining > 0n;
 
-    if (kickTime !== 0n && debtRemaining > 0n && collateralRemaining === 0n) return true;
+    if (
+      activeDebtAuction &&
+      (collateralRemaining === 0n || isPastAuctionAge(kickTime, nowSec, maxAuctionAge))
+    )
+      return true;
   }
 
   return false;
@@ -51,19 +58,37 @@ export async function _getUnsettledAuctions(
     const subgraphUrl = env.SUBGRAPH_URL;
 
     const query = gql`
-      query GetUnsettledAuctions($poolId: String!) {
-        liquidationAuctions(where: { pool: $poolId, settled: false }) {
+      query GetUnsettledAuctions($poolId: String!, $first: Int!, $skip: Int!) {
+        liquidationAuctions(
+          first: $first
+          skip: $skip
+          orderBy: id
+          orderDirection: asc
+          where: { pool: $poolId, settled: false }
+        ) {
           borrower
           kickTime
         }
       }
     `;
 
-    const result: GetUnsettledAuctionsResponse = await request(subgraphUrl!, query, {
-      poolId: poolAddress,
-    });
+    const liquidationAuctions: LiquidationAuction[] = [];
+    let skip = 0;
 
-    return result;
+    while (true) {
+      const result = await request<GetUnsettledAuctionsResponse>(subgraphUrl!, query, {
+        poolId: poolAddress,
+        first: AUCTION_PAGE_SIZE,
+        skip,
+      });
+
+      liquidationAuctions.push(...result.liquidationAuctions);
+
+      if (result.liquidationAuctions.length < AUCTION_PAGE_SIZE) break;
+      skip += AUCTION_PAGE_SIZE;
+    }
+
+    return { liquidationAuctions };
   } catch (err) {
     log.error(
       {
@@ -89,27 +114,12 @@ function safeOrigin(rawUrl: string | undefined): string | undefined {
   }
 }
 
-export function _filterAuctions(
-  response: GetUnsettledAuctionsResponse,
+export function isPastAuctionAge(
+  kickTime: bigint,
   nowSec: bigint,
   maxAuctionAge?: number,
-): LiquidationAuction[] {
-  const unsettledAuctions = response.liquidationAuctions;
+): boolean {
   const maxAge = maxAuctionAge ?? config.arkGlobal.maxAuctionAge;
-
-  if (maxAge === 0) return unsettledAuctions;
-
-  const maxAgeBig = BigInt(maxAge);
-  const auctionsBeforeCutoff: LiquidationAuction[] = [];
-
-  for (let i = 0; i < unsettledAuctions.length; i++) {
-    const kickTime = BigInt(unsettledAuctions[i]!.kickTime);
-    const auctionAge = nowSec - kickTime;
-
-    if (auctionAge > maxAgeBig) {
-      auctionsBeforeCutoff.push(unsettledAuctions[i]!);
-    }
-  }
-
-  return auctionsBeforeCutoff;
+  if (maxAge === 0) return true;
+  return nowSec - kickTime > BigInt(maxAge);
 }

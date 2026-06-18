@@ -8,7 +8,7 @@ import {
   createTestConfigPath,
   loadTestEnv,
   removeTestConfigPath,
-} from '../vitest.testEnv.ts';
+} from '../vitest/testEnv.ts';
 
 const ORIGINAL_ENV = { ...process.env };
 

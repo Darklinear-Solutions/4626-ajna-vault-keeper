@@ -6,14 +6,21 @@ import { arkRun } from '../keepers/arkKeeper.ts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-async function run() {
+export async function runKeeperInterval() {
   if (config.metavaultAddress) {
     await metavaultRun();
   }
 
   for (const ark of config.arks) {
-    const settings = resolveArkSettings(ark);
-    await arkRun(ark.vaultAddress, ark.vaultAuthAddress, settings);
+    try {
+      const settings = resolveArkSettings(ark);
+      await arkRun(ark.vaultAddress, ark.vaultAuthAddress, settings);
+    } catch (e) {
+      log.error(
+        { event: 'ark_run_failed', ark: ark.vaultAddress, vaultAuth: ark.vaultAuthAddress, err: e },
+        `ark run failed for ${ark.vaultAddress}; continuing to next ark`,
+      );
+    }
   }
 }
 
@@ -33,7 +40,7 @@ export function startScheduler() {
   (async () => {
     while (!signal.aborted) {
       try {
-        await run();
+        await runKeeperInterval();
       } catch (e) {
         log.error(
           { event: 'keeper_run_failed', err: e },
