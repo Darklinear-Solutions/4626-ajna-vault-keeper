@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
-const globalSetup = fileURLToPath(new URL('./global-setup.ts', import.meta.url));
+const globalSetup = fileURLToPath(new URL('./test/setup/global-setup.ts', import.meta.url));
 
 const common = {
   testTimeout: 60000,

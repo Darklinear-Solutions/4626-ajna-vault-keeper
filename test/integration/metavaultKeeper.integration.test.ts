@@ -11,6 +11,7 @@ import { config, resolveArkSettings } from '../../src/utils/config';
 import { client } from '../../src/utils/client';
 import { contract } from '../../src/utils/contract';
 import { type Address } from 'viem';
+import { waitForWrite } from '../helpers/transactions';
 
 // Tolerance large enough to absorb the accrual pad's slack across all configured strategies
 // (decreasing targets ask Euler to withdraw slightly less than what was prepared, so the buffer
@@ -143,13 +144,13 @@ describe('metavault keeper run', () => {
     // Pause the first ark
     const arkAuthAddress = process.env.ARK_AUTH_1_ADDRESS as Address;
     const arkAuth = contract('vaultAuth', arkAuthAddress);
-    await arkAuth().write.pause();
+    await waitForWrite(arkAuth().write.pause());
 
     // Second run should be a no-op (early return due to paused ark)
     await metavaultRun();
 
     // Unpause and verify nothing changed
-    await arkAuth().write.unpause();
+    await waitForWrite(arkAuth().write.unpause());
     const afterSecondRun = await getBalances();
 
     const tolerance = afterFirstRun.totalAssets / 1_000_000n || 1n;
@@ -183,13 +184,15 @@ describe('metavault keeper run', () => {
         outputs: [{ name: '', type: 'bool' }],
       },
     ];
-    await client.writeContract({
-      address: quoteTokenAddress,
-      abi: erc20ApproveAbi,
-      functionName: 'approve',
-      args: [config.metavaultAddress as Address, depositAmount],
-    });
-    await metavault().write.deposit([depositAmount, client.account.address]);
+    await waitForWrite(
+      client.writeContract({
+        address: quoteTokenAddress,
+        abi: erc20ApproveAbi,
+        functionName: 'approve',
+        args: [config.metavaultAddress as Address, depositAmount],
+      }),
+    );
+    await waitForWrite(metavault().write.deposit([depositAmount, client.account.address]));
 
     const afterDeposit = await getBalances();
     expect(afterDeposit.totalAssets).toBeGreaterThan(afterFirstRun.totalAssets);
@@ -246,11 +249,9 @@ describe('metavault keeper run', () => {
     // Withdraw from the metavault to reduce total assets, making arks overweight
     const metavault = contract('metavault');
     const withdrawAmount = 100n * 10n ** 18n;
-    await metavault().write.withdraw([
-      withdrawAmount,
-      client.account.address,
-      client.account.address,
-    ]);
+    await waitForWrite(
+      metavault().write.withdraw([withdrawAmount, client.account.address, client.account.address]),
+    );
 
     const afterWithdraw = await getBalances();
     expect(afterWithdraw.totalAssets).toBeLessThan(afterFirstRun.totalAssets);
@@ -289,7 +290,7 @@ describe('metavault keeper run', () => {
     // Pause ark 1 before the first run
     const arkAuthAddress = process.env.ARK_AUTH_1_ADDRESS as Address;
     const arkAuth = contract('vaultAuth', arkAuthAddress);
-    await arkAuth().write.pause();
+    await waitForWrite(arkAuth().write.pause());
 
     // Run with ark 1 paused — it should be excluded
     await metavaultRun();
@@ -299,7 +300,7 @@ describe('metavault keeper run', () => {
     expect(whilePaused.arkBalances[0]!).toBe(0n);
 
     // Unpause ark 1
-    await arkAuth().write.unpause();
+    await waitForWrite(arkAuth().write.unpause());
 
     // Run again — should now include ark 1 in rebalancing
     await metavaultRun();
