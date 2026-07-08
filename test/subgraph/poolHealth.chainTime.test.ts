@@ -101,6 +101,7 @@ describe('poolHasBadDebt uses chain time, not host wall clock', () => {
       config: {
         keeper: { exitOnSubgraphFailure: true },
         arkGlobal: { maxAuctionAge: 600 },
+        subgraph: { requestTimeoutMs: 10000 },
       },
     }));
     vi.doMock('../../src/utils/logger', () => ({

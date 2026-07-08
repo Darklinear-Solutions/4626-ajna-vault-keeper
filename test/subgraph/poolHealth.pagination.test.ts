@@ -10,6 +10,13 @@ type RequestVariables = {
   skip: number;
 };
 
+type RequestArgs = {
+  url: string;
+  document: string;
+  variables: RequestVariables;
+  signal: AbortSignal;
+};
+
 afterEach(() => {
   vi.resetModules();
   vi.doUnmock('graphql-request');
@@ -53,6 +60,7 @@ function mockPoolHealth(
     config: {
       keeper: { exitOnSubgraphFailure },
       arkGlobal: { maxAuctionAge: 259200 },
+      subgraph: { requestTimeoutMs: 10000 },
     },
   }));
   vi.doMock('../../src/utils/logger', () => ({
@@ -66,7 +74,7 @@ function mockPoolHealth(
 describe('_getUnsettledAuctions pagination', () => {
   it('fetches every page with explicit bounds and deterministic ordering', async () => {
     const requestedPages: RequestVariables[] = [];
-    const request = vi.fn(async (_url: string, _query: string, variables: RequestVariables) => {
+    const request = vi.fn(async ({ variables }: RequestArgs) => {
       requestedPages.push({ ...variables });
       if (requestedPages.length <= 2) {
         return { liquidationAuctions: makeAuctions(variables.first, variables.skip) };
@@ -88,7 +96,8 @@ describe('_getUnsettledAuctions pagination', () => {
       { poolId: POOL_ADDRESS.toLowerCase(), first: pageSize, skip: pageSize * 2 },
     ]);
 
-    const query = request.mock.calls[0]![1] as string;
+    const { document: query, signal } = request.mock.calls[0]![0];
+    expect(signal).toBeInstanceOf(AbortSignal);
     expect(query).toContain('first: $first');
     expect(query).toContain('skip: $skip');
     expect(query).toContain('orderBy: id');
@@ -97,7 +106,7 @@ describe('_getUnsettledAuctions pagination', () => {
 
   it('fails closed when a later page cannot be fetched', async () => {
     const cause = new Error('second page unavailable');
-    const request = vi.fn(async (_url: string, _query: string, variables: RequestVariables) => {
+    const request = vi.fn(async ({ variables }: { variables: RequestVariables }) => {
       if (variables.skip === 0) {
         return { liquidationAuctions: makeAuctions(variables.first, variables.skip) };
       }
@@ -114,13 +123,15 @@ describe('_getUnsettledAuctions pagination', () => {
     expect(result).toBeInstanceOf(SubgraphUnavailableError);
     expect((result as Error).cause).toBe(cause);
     expect(request).toHaveBeenCalledTimes(2);
-    const firstPage = request.mock.calls[0]![2] as RequestVariables;
-    expect(request.mock.calls[1]![2]).toMatchObject({ skip: firstPage.first });
+    const firstPage = (request.mock.calls[0]![0] as { variables: RequestVariables }).variables;
+    expect((request.mock.calls[1]![0] as { variables: RequestVariables }).variables).toMatchObject({
+      skip: firstPage.first,
+    });
   });
 
   it('detects bad debt returned after the first page', async () => {
     const badBorrower = '0x000000000000000000000000000000000000dEaD' as Address;
-    const request = vi.fn(async (_url: string, _query: string, variables: RequestVariables) => {
+    const request = vi.fn(async ({ variables }: { variables: RequestVariables }) => {
       if (variables.skip === 0) {
         return { liquidationAuctions: makeAuctions(variables.first, variables.skip) };
       }
@@ -139,5 +150,31 @@ describe('_getUnsettledAuctions pagination', () => {
 
     await expect(poolHasBadDebt(vault)).resolves.toBe(true);
     expect(vault.getAuctionStatus).toHaveBeenCalledWith(badBorrower);
+  });
+
+  it('fails closed when the subgraph returns a malformed borrower address', async () => {
+    const request = vi.fn(async () => ({
+      liquidationAuctions: [{ borrower: 'not-an-address', kickTime: '1700000500' }],
+    }));
+
+    mockPoolHealth(request, true);
+    const { _getUnsettledAuctions, SubgraphUnavailableError } = await import(
+      '../../src/subgraph/poolHealth'
+    );
+
+    const result = await _getUnsettledAuctions(makeVault()).catch((e) => e);
+
+    expect(result).toBeInstanceOf(SubgraphUnavailableError);
+  });
+
+  it('honors fail-open for a malformed borrower when exitOnSubgraphFailure is disabled', async () => {
+    const request = vi.fn(async () => ({
+      liquidationAuctions: [{ borrower: 'not-an-address', kickTime: '1700000500' }],
+    }));
+
+    mockPoolHealth(request, false);
+    const { _getUnsettledAuctions } = await import('../../src/subgraph/poolHealth');
+
+    await expect(_getUnsettledAuctions(makeVault())).resolves.toEqual({ liquidationAuctions: [] });
   });
 });

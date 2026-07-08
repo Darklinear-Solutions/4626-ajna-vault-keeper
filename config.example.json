@@ -16,7 +16,8 @@
     "onchainMaxStaleness": 86400,
     "offchainMaxStaleness": 86400,
     "fixedPrice": null,
-    "futureSkewTolerance": 120
+    "futureSkewTolerance": 120,
+    "requestTimeoutMs": 10000
   },
 
   "arkGlobal": {
@@ -35,6 +36,10 @@
 
   "remoteSigner": {
     "requestTimeoutMs": 30000
+  },
+
+  "subgraph": {
+    "requestTimeoutMs": 10000
   },
 
   "arks": [

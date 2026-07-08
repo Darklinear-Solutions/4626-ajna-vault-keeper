@@ -108,10 +108,12 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | `oracle.offchainMaxStaleness`    | Max allowed age of CoinGecko price data based on the response `last_updated_at` timestamp. | Integer (seconds)        | Optional                                       | `86400`          |
     | `oracle.fixedPrice`              | The keeper can be configured to skip both oracles and use a hard-coded price, defined here. Set to `null` to use the live oracle. The value is parsed as a decimal string into Ajna's 18-decimal price domain, independent of quote-token decimals. Numeric literals are rejected to avoid precision loss. When enabled, the keeper emits a startup warning because this mode bypasses live oracle checks. | String decimal (e.g. `"1.00"`) or `null` | Optional | `null` |
     | `oracle.futureSkewTolerance`     | Max clock drift allowed from Chronicle timestamps.                               | Integer (seconds)        | Optional                                       | 120 (2 minutes)  |
+    | `oracle.requestTimeoutMs`        | Per-request timeout applied to each CoinGecko price fetch. Bounded above by `keeper.intervalMs` so a hung price API cannot stall the run across intervals. A timeout counts as a failed fetch, so the keeper falls through to the onchain oracle. | Integer (milliseconds) | Optional | 10,000 (10s) |
     | `transaction.gasBuffer`          | Accounts for occasional Viem gas underestimation for the functions that interact with Ajna, resulting in sporadic `OutOfGas` reversions. | Integer (percentage)     | Optional                                       | 50 (50%)         |
-    | `transaction.defaultGas`         | Default gas limit in the event that gas estimation with the above buffer fails.  | Integer                  | Optional                                       | 1,500,000        |
+    | `transaction.defaultGas`         | Default gas limit in the event that gas estimation with the above buffer fails.  | Integer                  | Optional                                       | 5,000,000        |
     | `transaction.confirmations`      | Number of block confirmations to wait for each tx.                               | Integer                  | Required                                       | N/A              |
     | `remoteSigner.requestTimeoutMs`  | Per-request timeout applied to every remote signer JSON-RPC call. Bounded above by `keeper.intervalMs` so a hung signer cannot pin the keeper across runs. Only consulted when remote signer credential mode is in use. | Integer (milliseconds) | Optional                                       | 30,000 (30s)     |
+    | `subgraph.requestTimeoutMs`      | Per-query timeout applied to the subgraph auction lookup, spanning the whole pagination loop rather than each page. Bounded above by `keeper.intervalMs` so a hung subgraph cannot stall the run. A timeout counts as a subgraph failure and follows `keeper.exitOnSubgraphFailure`. | Integer (milliseconds) | Optional | 10,000 (10s) |
     | `arkGlobal.optimalBucketDiff`    | Offset (in bucket indexes) from current pool price to select the optimal bucket. Can also be set per ARK. | Integer | Conditional (required globally or per ARK) | None             |
     | `arkGlobal.bufferPadding`        | Accounts for the slight variation in the value of `totalAssets` (due to interest accruing in Ajna). | String (`WAD`)  | Optional                                       | `"100000000000000"` (1e14) |
     | `arkGlobal.minMoveAmount`        | Skip moves if bucket's quote token balance is below this amount (dust limit) - enforced by vault. | String (`WAD` units)    | Optional                                       | `"1000001"`      |
@@ -240,7 +242,9 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
           * `gas_estimation_failed` - Viem gas estimation for vault functions failed, indicating that the keeper will fall back to the hard-coded value.
       * Errors:
           * `ark_run_aborted` - emitted when an ARK keeper run exits early for any of the reasons specified above in [Early Fail or Skip Conditions](#exit-conditions).
+          * `ark_run_failed` - an ARK run threw an unexpected error and was isolated by the scheduler so the remaining ARKs still run.
           * `metavault_run_aborted` - metavault run aborted with the reason.
+          * `metavault_run_failed` - the metavault run threw an unexpected error and was isolated by the scheduler so the ARK runs still execute.
           * `keeper_run_failed` - run aborted with error details (scheduler-level catch).
           * `tx_failed` - failed tx with phase (`send`, `fail`, `revert`, `insufficient_funds`), hash, receipt, and context.
           * `subgraph_query_failed` - query for open auctions via configured subgraph threw an error.
@@ -370,7 +374,7 @@ In production, `.env` values should be provided at runtime from the deployment e
 
 ## <a name="deployment-requirements"></a>Deployment Requirements
 
-For every managed ARK, the keeper signer must be authorised as a keeper in the ARK's `VaultAuth`. If an ARK is managed through this repo's metavault flow, its `bufferRatio` must be set to `0`. In this operating model, withdrawal liquidity is managed at the shared Euler Earn Buffer layer rather than being intentionally retained inside each ARK.
+For every managed ARK, the keeper signer must be authorised as a keeper in the ARK's `VaultAuth`. If an ARK is managed through this repo's metavault flow, its `bufferRatio`, `tax`, and `toll` must all be set to `0`. In this operating model, withdrawal liquidity is managed at the shared Euler Earn Buffer layer rather than being intentionally retained inside each ARK, and the reallocation planner assumes ARK deposits and withdrawals are not charged a fee. The keeper reads all three values at startup and refuses to boot if any managed ARK has a non-zero `bufferRatio`, `tax`, or `toll`.
 
 If `metavaultAddress` is set, the Euler Earn deployment also needs to match the keeper's assumptions. The strategy at `buffer.address` must be the first strategy in the deployment's strategy array, its cap must be `type(uint136).max`, and that cap must already have been accepted on the metavault before the keeper starts. The keeper treats that strategy as the shared Buffer allocation when it computes metavault reallocations.
 

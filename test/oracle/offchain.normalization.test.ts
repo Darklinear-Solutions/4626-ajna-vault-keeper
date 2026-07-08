@@ -24,6 +24,7 @@ describe('offchain oracle exact parsing', () => {
           apiUrl: 'https://example.test',
           offchainMaxStaleness: 60,
           futureSkewTolerance: 120,
+          requestTimeoutMs: 10000,
         },
       },
     }));
@@ -39,6 +40,8 @@ describe('offchain oracle exact parsing', () => {
     await expect(getOffchainPrice()).resolves.toBe('0.999870478245824934');
     const requestedUrl = new URL(fetch.mock.calls[0]![0] as string);
     expect(requestedUrl.searchParams.get('include_last_updated_at')).toBe('true');
+    const requestInit = fetch.mock.calls[0]![1] as RequestInit;
+    expect(requestInit.signal).toBeInstanceOf(AbortSignal);
   });
 
   it('fails closed on scientific-notation literals from the network response', async () => {
@@ -53,6 +56,7 @@ describe('offchain oracle exact parsing', () => {
           apiUrl: 'https://example.test',
           offchainMaxStaleness: 60,
           futureSkewTolerance: 120,
+          requestTimeoutMs: 10000,
         },
       },
     }));
@@ -84,6 +88,7 @@ describe('offchain oracle exact parsing', () => {
           apiUrl: 'https://example.test',
           offchainMaxStaleness: 60,
           futureSkewTolerance: 120,
+          requestTimeoutMs: 10000,
         },
       },
     }));
@@ -114,6 +119,7 @@ describe('offchain oracle exact parsing', () => {
           apiUrl: 'https://example.test',
           offchainMaxStaleness: 60,
           futureSkewTolerance: 120,
+          requestTimeoutMs: 10000,
         },
       },
     }));
@@ -145,6 +151,7 @@ describe('offchain oracle exact parsing', () => {
           apiUrl: 'https://example.test',
           offchainMaxStaleness: 60,
           futureSkewTolerance: 120,
+          requestTimeoutMs: 10000,
         },
       },
     }));
@@ -176,6 +183,7 @@ describe('offchain oracle exact parsing', () => {
           apiUrl: 'https://example.test',
           offchainMaxStaleness: 60,
           futureSkewTolerance: 120,
+          requestTimeoutMs: 10000,
         },
       },
     }));
@@ -206,6 +214,7 @@ describe('offchain oracle exact parsing', () => {
           apiUrl: 'https://example.test',
           offchainMaxStaleness: 60,
           futureSkewTolerance: 120,
+          requestTimeoutMs: 10000,
         },
       },
     }));

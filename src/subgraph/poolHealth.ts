@@ -3,7 +3,7 @@ import { env } from '../utils/env.ts';
 import { config } from '../utils/config.ts';
 import { log } from '../utils/logger.ts';
 import { getChainTime } from '../utils/chainTime.ts';
-import type { Address } from 'viem';
+import { isAddress, type Address } from 'viem';
 
 type GetUnsettledAuctionsResponse = {
   liquidationAuctions: LiquidationAuction[];
@@ -74,13 +74,21 @@ export async function _getUnsettledAuctions(
 
     const liquidationAuctions: LiquidationAuction[] = [];
     let skip = 0;
+    const signal = AbortSignal.timeout(config.subgraph.requestTimeoutMs);
 
     while (true) {
-      const result = await request<GetUnsettledAuctionsResponse>(subgraphUrl!, query, {
-        poolId: poolAddress,
-        first: AUCTION_PAGE_SIZE,
-        skip,
+      const result = await request<GetUnsettledAuctionsResponse>({
+        url: subgraphUrl!,
+        document: query,
+        variables: { poolId: poolAddress, first: AUCTION_PAGE_SIZE, skip },
+        signal,
       });
+
+      for (const auction of result.liquidationAuctions) {
+        if (!isAddress(auction.borrower)) {
+          throw new Error(`subgraph returned malformed borrower address: ${auction.borrower}`);
+        }
+      }
 
       liquidationAuctions.push(...result.liquidationAuctions);
 

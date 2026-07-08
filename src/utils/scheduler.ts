@@ -8,7 +8,14 @@ import { arkRun } from '../keepers/arkKeeper.ts';
 
 export async function runKeeperInterval() {
   if (config.metavaultAddress) {
-    await metavaultRun();
+    try {
+      await metavaultRun();
+    } catch (e) {
+      log.error(
+        { event: 'metavault_run_failed', err: e },
+        'metavault run failed; continuing to ark runs',
+      );
+    }
   }
 
   for (const ark of config.arks) {

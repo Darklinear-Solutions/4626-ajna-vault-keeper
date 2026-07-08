@@ -40,6 +40,7 @@ type RawConfig = {
     offchainMaxStaleness?: number;
     fixedPrice: string | null;
     futureSkewTolerance?: number;
+    requestTimeoutMs?: number;
   };
 
   arkGlobal: {
@@ -60,6 +61,10 @@ type RawConfig = {
     requestTimeoutMs?: number;
   };
 
+  subgraph?: {
+    requestTimeoutMs?: number;
+  };
+
   arks: ArkConfig[];
   buffer: {
     address: Address;
@@ -73,6 +78,8 @@ type RawConfig = {
 export const DEFAULT_ONCHAIN_MAX_STALENESS = 86400;
 export const DEFAULT_OFFCHAIN_MAX_STALENESS = 86400;
 export const DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS = 30000;
+export const DEFAULT_ORACLE_REQUEST_TIMEOUT_MS = 10000;
+export const DEFAULT_SUBGRAPH_REQUEST_TIMEOUT_MS = 10000;
 export const DEFAULT_FUTURE_SKEW_TOLERANCE = 120;
 const DEFAULT_BUFFER_PADDING = '100000000000000';
 const DEFAULT_MIN_MOVE_AMOUNT = '1000001';
@@ -107,6 +114,7 @@ validateOracle(raw);
 validateArkGlobal(raw);
 validateTransaction(raw);
 validateRemoteSigner(raw);
+validateSubgraph(raw);
 validateBuffer(raw);
 validateArks(raw);
 validateAllocationSum(raw);
@@ -141,11 +149,12 @@ export function resolveArkSettings(ark: ArkConfig): ResolvedArkSettings {
 
 type ResolvedOracleConfig = Omit<
   RawConfig['oracle'],
-  'onchainMaxStaleness' | 'offchainMaxStaleness' | 'futureSkewTolerance'
+  'onchainMaxStaleness' | 'offchainMaxStaleness' | 'futureSkewTolerance' | 'requestTimeoutMs'
 > & {
   onchainMaxStaleness: number | null;
   offchainMaxStaleness: number;
   futureSkewTolerance: number;
+  requestTimeoutMs: number;
 };
 
 export const config = {
@@ -155,6 +164,7 @@ export const config = {
   arkGlobal: raw.arkGlobal as Required<RawConfig['arkGlobal']>,
   transaction: raw.transaction as Required<RawConfig['transaction']>,
   remoteSigner: raw.remoteSigner as Required<NonNullable<RawConfig['remoteSigner']>>,
+  subgraph: raw.subgraph as Required<NonNullable<RawConfig['subgraph']>>,
   quoteTokenAddress: quoteTokenAddress.toLowerCase() as Address,
   metavaultAddress: (metavaultAddress || undefined) as Address | undefined,
   defaultGas: BigInt(raw.transaction.defaultGas!),
@@ -244,6 +254,21 @@ function validateOracle(c: RawConfig): void {
     requireSafeInteger(c.oracle.futureSkewTolerance, 'oracle.futureSkewTolerance', { min: 0 });
   }
   c.oracle.futureSkewTolerance ??= DEFAULT_FUTURE_SKEW_TOLERANCE;
+
+  if (c.oracle.requestTimeoutMs !== undefined) {
+    requireSafeInteger(
+      c.oracle.requestTimeoutMs,
+      'oracle.requestTimeoutMs',
+      { min: 1 },
+      { detail: 'must be a positive integer' },
+    );
+    if (c.oracle.requestTimeoutMs > c.keeper.intervalMs) {
+      throwConfigError(
+        `oracle.requestTimeoutMs (${c.oracle.requestTimeoutMs}) must not exceed keeper.intervalMs (${c.keeper.intervalMs})`,
+      );
+    }
+  }
+  c.oracle.requestTimeoutMs ??= DEFAULT_ORACLE_REQUEST_TIMEOUT_MS;
 }
 
 function validateArkGlobal(c: RawConfig): void {
@@ -308,6 +333,28 @@ function validateRemoteSigner(c: RawConfig): void {
   }
   c.remoteSigner ??= {};
   c.remoteSigner.requestTimeoutMs ??= DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS;
+}
+
+function validateSubgraph(c: RawConfig): void {
+  if (c.subgraph !== undefined) {
+    requireObject(c.subgraph, 'subgraph');
+
+    if (c.subgraph.requestTimeoutMs !== undefined) {
+      requireSafeInteger(
+        c.subgraph.requestTimeoutMs,
+        'subgraph.requestTimeoutMs',
+        { min: 1 },
+        { detail: 'must be a positive integer' },
+      );
+      if (c.subgraph.requestTimeoutMs > c.keeper.intervalMs) {
+        throwConfigError(
+          `subgraph.requestTimeoutMs (${c.subgraph.requestTimeoutMs}) must not exceed keeper.intervalMs (${c.keeper.intervalMs})`,
+        );
+      }
+    }
+  }
+  c.subgraph ??= {};
+  c.subgraph.requestTimeoutMs ??= DEFAULT_SUBGRAPH_REQUEST_TIMEOUT_MS;
 }
 
 function validateBuffer(c: RawConfig): void {

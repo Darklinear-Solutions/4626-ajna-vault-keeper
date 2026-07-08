@@ -39,6 +39,7 @@ describe('subgraph failure handling', () => {
       config: {
         keeper: { exitOnSubgraphFailure: true },
         arkGlobal: { maxAuctionAge: 259200 },
+        subgraph: { requestTimeoutMs: 10000 },
       },
     }));
     vi.doMock('../../src/utils/logger', () => ({
@@ -79,6 +80,7 @@ describe('subgraph failure handling', () => {
       config: {
         keeper: { exitOnSubgraphFailure: false },
         arkGlobal: { maxAuctionAge: 259200 },
+        subgraph: { requestTimeoutMs: 10000 },
       },
     }));
     vi.doMock('../../src/utils/logger', () => ({
@@ -113,6 +115,7 @@ describe('subgraph URL redaction in failure logs', () => {
       config: {
         keeper: { exitOnSubgraphFailure: true },
         arkGlobal: { maxAuctionAge: 259200 },
+        subgraph: { requestTimeoutMs: 10000 },
       },
     }));
     vi.doMock('../../src/utils/logger', () => ({

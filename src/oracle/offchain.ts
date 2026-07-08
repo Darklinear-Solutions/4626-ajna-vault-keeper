@@ -27,7 +27,11 @@ const headers: Record<string, string> = {
 export async function getOffchainPrice(): Promise<string> {
   const address = config.quoteTokenAddress;
 
-  const res = await fetch(_priceUrl(), { method: 'GET', headers });
+  const res = await fetch(_priceUrl(), {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(config.oracle.requestTimeoutMs),
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const body = await res.text();
