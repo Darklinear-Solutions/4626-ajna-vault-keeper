@@ -4,7 +4,14 @@ import { config } from './config.ts';
 type StaticTuple = readonly [string | undefined, string | undefined];
 
 export const contracts = {
-  chronicle: [config.oracle.onchainAddress, process.env.MOCK_CHRONICLE_ADDRESS] as StaticTuple,
+  chronicleCollateral: [
+    config.oracle.onchainCollateralAddress,
+    process.env.MOCK_CHRONICLE_ADDRESS,
+  ] as StaticTuple,
+  chronicleQuote: [
+    config.oracle.onchainQuoteAddress,
+    process.env.MOCK_CHRONICLE_QUOTE_ADDRESS ?? process.env.MOCK_CHRONICLE_ADDRESS,
+  ] as StaticTuple,
   metavault: [config.metavaultAddress, config.metavaultAddress] as StaticTuple,
 } as const;
 

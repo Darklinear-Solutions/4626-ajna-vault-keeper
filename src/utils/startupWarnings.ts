@@ -12,14 +12,35 @@ export function logStartupWarnings(): void {
     );
   }
 
-  if (config.oracle.onchainAddress && config.oracle.onchainMaxStaleness == null) {
+  if (
+    config.oracle.onchainCollateralAddress &&
+    config.oracle.onchainQuoteAddress &&
+    config.oracle.onchainMaxStaleness == null
+  ) {
     startupNoticeLog.warn(
       {
         event: 'oracle_staleness_check_disabled',
-        onchainAddress: config.oracle.onchainAddress,
+        onchainCollateralAddress: config.oracle.onchainCollateralAddress,
+        onchainQuoteAddress: config.oracle.onchainQuoteAddress,
         onchainPrimary: config.oracle.onchainPrimary,
       },
       'onchain oracle staleness checking is disabled via explicit config override',
+    );
+  }
+
+  const collateralToken = config.collateralTokenAddress?.toLowerCase();
+  if (collateralToken && collateralToken === config.quoteTokenAddress.toLowerCase()) {
+    startupNoticeLog.warn(
+      { event: 'oracle_denomination_degenerate', source: 'offchain' },
+      'collateralTokenAddress equals quoteTokenAddress: the offchain oracle will price every pair as a constant 1.0',
+    );
+  }
+
+  const collateralFeed = config.oracle.onchainCollateralAddress?.toLowerCase();
+  if (collateralFeed && collateralFeed === config.oracle.onchainQuoteAddress?.toLowerCase()) {
+    startupNoticeLog.warn(
+      { event: 'oracle_denomination_degenerate', source: 'onchain' },
+      'oracle.onchainCollateralAddress equals oracle.onchainQuoteAddress: the onchain oracle will price every pair as a constant 1.0',
     );
   }
 

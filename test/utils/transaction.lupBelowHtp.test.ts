@@ -27,7 +27,8 @@ describe('wait LUPBelowHTP detection', () => {
         transaction: { confirmations: 1 },
         keeper: { haltIfLupBelowHtp: true },
         oracle: {
-          onchainAddress: '0x00000000000000000000000000000000000000f6',
+          onchainCollateralAddress: '0x00000000000000000000000000000000000000f6',
+          onchainQuoteAddress: '0x00000000000000000000000000000000000000f6',
         },
         defaultGas: 0n,
         gasBuffer: 0n,

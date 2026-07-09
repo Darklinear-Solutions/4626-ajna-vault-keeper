@@ -21,7 +21,7 @@ function getVaultAuthAddr(): Address {
 }
 
 const vaultAuth = () => contract('vaultAuth', getVaultAuthAddr())();
-const chronicle = contract('chronicle');
+const chronicle = () => contract('chronicle', process.env.MOCK_CHRONICLE_ADDRESS as Address)();
 const vault = () => contract('vault', getVaultAddr())();
 
 const getPool = async () => {

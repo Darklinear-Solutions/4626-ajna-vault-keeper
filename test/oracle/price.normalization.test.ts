@@ -8,8 +8,8 @@ afterEach(() => {
 });
 
 describe('oracle price normalization', () => {
-  it('normalizes offchain human-readable prices into Ajna WAD prices', async () => {
-    const getOffchainPrice = vi.fn().mockResolvedValue('1.25');
+  it('returns the WAD price supplied by a source', async () => {
+    const getOffchainPrice = vi.fn().mockResolvedValue(1_250_000_000_000_000_000n);
     const getOnchainPrice = vi.fn().mockRejectedValue(new Error('onchain unavailable'));
 
     vi.doMock('../../src/utils/config.ts', () => ({
@@ -32,7 +32,7 @@ describe('oracle price normalization', () => {
   });
 
   it('rejects live oracle prices outside the Ajna price range', async () => {
-    const getOffchainPrice = vi.fn().mockResolvedValue('0.000000001');
+    const getOffchainPrice = vi.fn().mockResolvedValue(1_000_000_000n);
     const getOnchainPrice = vi.fn().mockRejectedValue(new Error('onchain unavailable'));
 
     vi.doMock('../../src/utils/config.ts', () => ({

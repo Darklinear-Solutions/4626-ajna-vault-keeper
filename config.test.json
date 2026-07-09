@@ -1,6 +1,7 @@
 {
   "chainId": 1,
   "quoteTokenAddress": "0x6b175474e89094c44da98b954eedeac495271d0f",
+  "collateralTokenAddress": "0x6b175474e89094c44da98b954eedeac495271d0f",
   "metavaultAddress": "",
 
   "keeper": {
@@ -13,7 +14,8 @@
   "oracle": {
     "apiUrl": "https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=0x6B175474E89094C44Da98b954EedeAC495271d0F&vs_currencies=usd",
     "onchainPrimary": true,
-    "onchainAddress": "0x74661a9ea74fD04975c6eBc6B155Abf8f885636c",
+    "onchainCollateralAddress": "0x74661a9ea74fD04975c6eBc6B155Abf8f885636c",
+    "onchainQuoteAddress": "0x74661a9ea74fD04975c6eBc6B155Abf8f885636c",
     "onchainMaxStaleness": null,
     "fixedPrice": null,
     "futureSkewTolerance": 120

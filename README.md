@@ -95,16 +95,18 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | Config Key                       | Description                                                                      | Type                     | Required/Optional                              | Default          |
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
     | `chainId`                        | Chain ID for the intended network.                                               | Integer                  | Optional                                       | 1 (Ethereum mainnet) |
-    | `quoteTokenAddress`              | Address of the vault's quote token.                                              | Ethereum address (`0x...`) | Required                                     | None             |
+    | `quoteTokenAddress`              | Address of the vault's quote token. The keeper prices the pool as quote tokens per collateral token. | Ethereum address (`0x...`) | Required                                     | None             |
+    | `collateralTokenAddress`         | Address of the vault's collateral token. Used with `quoteTokenAddress` so the offchain oracle can read a USD price for each token and divide collateral USD by quote USD into the quote-per-collateral price. Required for non-stablecoin pools where the two tokens are not both near 1 USD. | Ethereum address (`0x...`) | Conditional (required when `oracle.apiUrl` is set) | None |
     | `metavaultAddress`               | Address of the Euler Earn (metavault) contract. If omitted, only the ARK keeper runs. | Ethereum address (`0x...`) | Optional                                   | None             |
     | `keeper.intervalMs`              | Interval between keeper runs.                                                    | Integer (milliseconds)   | Required                                       | 43,200,000 (12h) |
     | `keeper.logLevel`                | Minimum severity of logs (`info`, `warn`, `error`).                              | String                   | Optional                                       | `info`           |
     | `keeper.exitOnSubgraphFailure`   | Abort run if the subgraph query fails during the check for bad debt in the pool. The default is fail-closed. Set this to `false` only if you explicitly prefer availability over the bad-debt guard during subgraph outages. | Boolean                  | Optional                                       | `true`           |
     | `keeper.haltIfLupBelowHtp`       | If operations trigger `LUPBelowHTP` error from Ajna, halt keeper until restarted to prevent more tokens from being added to the pool while move targets are likely to require liquidations. | Boolean | Required                      | N/A              |
-    | `oracle.apiUrl`                  | API endpoint for offchain price oracle using CoinGecko.                          | URL (`https://...`)      | Conditional (if onchain oracle is not primary and no fixed price is set) | None |
+    | `oracle.apiUrl`                  | CoinGecko endpoint for the offchain price oracle. The URL must request USD prices for both the collateral and quote tokens (list both in `contract_addresses`) so the keeper can divide them into the quote-per-collateral price. | URL (`https://...`)      | Conditional (if onchain oracle is not primary and no fixed price is set) | None |
     | `oracle.onchainPrimary`          | Use onchain oracle as primary instead of CoinGecko.                              | Boolean                  | Required                                       | N/A              |
-    | `oracle.onchainAddress`          | Address of Chronicle onchain oracle.                                             | Ethereum address (`0x...`) | Conditional (if `onchainPrimary` is true)    | None             |
-    | `oracle.onchainMaxStaleness`     | Max allowed age of onchain price data. When omitted and the onchain oracle is primary, the keeper defaults this to `86400` seconds. Set to `null` only to explicitly disable the staleness check. | Integer (seconds) or `null` | Optional                                  | `86400` when `oracle.onchainPrimary` is `true`, otherwise `null` |
+    | `oracle.onchainCollateralAddress` | Chronicle feed returning the collateral token's USD price. Divided by the quote feed to produce the quote-per-collateral price. Feed decimals cancel in the division, so the two feeds only need to share a decimal convention. | Ethereum address (`0x...`) | Conditional (both onchain feeds required when `onchainPrimary` is true) | None |
+    | `oracle.onchainQuoteAddress`     | Chronicle feed returning the quote token's USD price. Must be set together with `oracle.onchainCollateralAddress`. | Ethereum address (`0x...`) | Conditional (both onchain feeds required when `onchainPrimary` is true) | None |
+    | `oracle.onchainMaxStaleness`     | Max allowed age of onchain price data. When omitted, the keeper defaults this to `86400` seconds if an onchain oracle is configured (both `oracle.onchainCollateralAddress` and `oracle.onchainQuoteAddress` are set), otherwise `null`. Set to `null` only to explicitly disable the staleness check. | Integer (seconds) or `null` | Optional                                  | `86400` when the onchain feeds are configured, otherwise `null` |
     | `oracle.offchainMaxStaleness`    | Max allowed age of CoinGecko price data based on the response `last_updated_at` timestamp. | Integer (seconds)        | Optional                                       | `86400`          |
     | `oracle.fixedPrice`              | The keeper can be configured to skip both oracles and use a hard-coded price, defined here. Set to `null` to use the live oracle. The value is parsed as a decimal string into Ajna's 18-decimal price domain, independent of quote-token decimals. Numeric literals are rejected to avoid precision loss. When enabled, the keeper emits a startup warning because this mode bypasses live oracle checks. | String decimal (e.g. `"1.00"`) or `null` | Optional | `null` |
     | `oracle.futureSkewTolerance`     | Max clock drift allowed from Chronicle timestamps.                               | Integer (seconds)        | Optional                                       | 120 (2 minutes)  |
@@ -177,7 +179,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     
     * If `vault.paused()` is true - the keeper exits immediately with no state changes.
     * If `poolHasBadDebt()` is true - the pool has unresolved bad debt or active liquidations, the keeper exits immediately.
-    * If the computed optimal bucket is out of range (below `vault.minBucketIndex()` or above `getHtp()`), the keeper exits early with no moves, leaving bucket balances unchanged.
+    * If the computed optimal bucket is out of range (its price is below `min(HTP, LUP)` or above `min(currentPrice, priceAt(minBucketIndex))`, the interest-earning band checked by `isBucketInRange`), the keeper exits early with no moves, leaving bucket balances unchanged.
     * If the computed move size is below the keeper's configured minimum threshold, the action is skipped to avoid dust transfers.
     * If the optimal bucket is dusty (below the dust threshold in LP tokens) then the keeper skips to avoid operating on very small bucket amounts.
     * If the optimal bucket has been bankrupt more recently than the configured `minTimeSinceBankruptcy`, the run is aborted to prevent risky deposits.
@@ -217,7 +219,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
       * If the buffer is still in deficit, the keeper continues pulling liquidity from out-of-range buckets into the Buffer with `vault.moveToBuffer(...)` until the gap is closed or no suitable buckets remain.
     * Guards per move (reads before each tx)
       * `shouldSkipBucket(bucket, data)` - returns `true` if the bucket is the `optimalBucket`, if `lpToValue(bucket) < minMoveAmount` (dust), or if `isBucketInRange(bucket, data)` is `true`. Otherwise, the bucket is a candidate for moves.
-      * `isBucketInRange(bucketPrice, data)` - returns `true` if the bucket's price lies within `[max(LUP, priceAt(minBucketIndex)), min(currentPrice, HTP)]`. Buckets outside this range are considered out-of-range and eligible for rebalancing.
+      * `isBucketInRange(bucketPrice, data)` - returns `true` if the bucket's price lies within `[min(HTP, LUP), min(currentPrice, priceAt(minBucketIndex))]` (when `minBucketIndex` is 0, the upper bound is simply `currentPrice`). Buckets outside this range are considered out-of-range and eligible for rebalancing.
 
 6. <a name="technical-overview-6-housekeeping-and-telemetry"></a>Housekeeping & Telemetry:
     * Vault events & functions:
@@ -237,6 +239,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
           * `ark_run_halted` - emitted when the ARK keeper is halted due to a `LUPBelowHTP` error. The keeper will not run again until the process is restarted.
           * `subgraph_fail_open_enabled` - emitted at startup when `keeper.exitOnSubgraphFailure` is set to `false`, meaning subgraph query failures will be treated as if there are no auctions.
           * `oracle_staleness_check_disabled` - emitted at startup when the Chronicle stale-price check has been explicitly disabled with `oracle.onchainMaxStaleness: null`.
+          * `oracle_denomination_degenerate` - emitted at startup when the collateral and quote token addresses (offchain) or the two Chronicle feed addresses (onchain) are identical, which makes that oracle return a constant price of 1.0.
           * `oracle_fixed_price_enabled` - emitted at startup when `oracle.fixedPrice` is configured and the keeper will bypass live oracle reads.
           * `price_query_failed` - query failed for the first of the two configured price feeds.
           * `gas_estimation_failed` - Viem gas estimation for vault functions failed, indicating that the keeper will fall back to the hard-coded value.
@@ -368,7 +371,7 @@ For `config.json`, start from the example:
 cp config.example.json config.json
 ```
 
-Then fill in the placeholder addresses and any environment-specific settings. At minimum, `quoteTokenAddress`, `arks`, `buffer`, and oracle configuration must be set. If the metavault address is provided, the metavault keeper will run alongside the ARK keeper. If omitted, only the ARK keeper runs.
+Then fill in the placeholder addresses and any environment-specific settings. At minimum, `quoteTokenAddress`, `collateralTokenAddress` (when the offchain oracle is used), `arks`, `buffer`, and oracle configuration must be set. If the metavault address is provided, the metavault keeper will run alongside the ARK keeper. If omitted, only the ARK keeper runs.
 
 In production, `.env` values should be provided at runtime from the deployment environment. Prefer a remote signer when available. If you use a raw private key instead, inject it from the deployer's secret manager rather than baking it into images or committed files. The default Docker image expects `config.json` to be mounted at runtime, though you can also bake it into a derivative image if your deployment process requires that.
 
@@ -397,7 +400,7 @@ The settings below change the operational model and should be reviewed explicitl
 | ------- | ------------------- |
 | `keeper.exitOnSubgraphFailure` | `true` fails closed when the bad-debt dependency is unavailable. `false` keeps the process running but treats subgraph outages as if there are no blocking auctions. |
 | `oracle.fixedPrice` | Bypasses live oracle reads and freshness checks. Use only as an explicit emergency or controlled override. |
-| `oracle.onchainPrimary`, `oracle.onchainAddress`, `oracle.apiUrl`, `oracle.onchainMaxStaleness`, `oracle.offchainMaxStaleness` | Define which oracle path the keeper trusts first, whether it can fall back, and how stale live oracle data may be before the run aborts. |
+| `oracle.onchainPrimary`, `oracle.onchainCollateralAddress`, `oracle.onchainQuoteAddress`, `oracle.apiUrl`, `oracle.onchainMaxStaleness`, `oracle.offchainMaxStaleness` | Define which oracle path the keeper trusts first, whether it can fall back, and how stale live oracle data may be before the run aborts. |
 | `transaction.gasBuffer`, `transaction.defaultGas`, `transaction.confirmations` | Define gas padding, fallback gas limit, and how long the keeper waits before treating each submitted step as confirmed. |
 
 ## <a name="failure-and-recovery"></a>Failure and Recovery

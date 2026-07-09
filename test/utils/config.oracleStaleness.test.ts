@@ -17,7 +17,8 @@ describe('config onchainMaxStaleness handling', () => {
         },
         "oracle": {
           "onchainPrimary": true,
-          "onchainAddress": "0x0000000000000000000000000000000000000002",
+          "onchainCollateralAddress": "0x0000000000000000000000000000000000000002",
+          "onchainQuoteAddress": "0x0000000000000000000000000000000000000002",
           "fixedPrice": null
         },
         "arkGlobal": {},
@@ -42,6 +43,7 @@ describe('config onchainMaxStaleness handling', () => {
       readFileSync: () => `{
         "chainId": 1,
         "quoteTokenAddress": "0x0000000000000000000000000000000000000001",
+        "collateralTokenAddress": "0x0000000000000000000000000000000000000001",
         "keeper": {
           "intervalMs": 1,
           "haltIfLupBelowHtp": true
@@ -49,7 +51,8 @@ describe('config onchainMaxStaleness handling', () => {
         "oracle": {
           "apiUrl": "https://example.test",
           "onchainPrimary": false,
-          "onchainAddress": "0x0000000000000000000000000000000000000002",
+          "onchainCollateralAddress": "0x0000000000000000000000000000000000000002",
+          "onchainQuoteAddress": "0x0000000000000000000000000000000000000002",
           "fixedPrice": null
         },
         "arkGlobal": {},
@@ -80,7 +83,8 @@ describe('config onchainMaxStaleness handling', () => {
         },
         "oracle": {
           "onchainPrimary": true,
-          "onchainAddress": "0x0000000000000000000000000000000000000002",
+          "onchainCollateralAddress": "0x0000000000000000000000000000000000000002",
+          "onchainQuoteAddress": "0x0000000000000000000000000000000000000002",
           "onchainMaxStaleness": null,
           "fixedPrice": null
         },
@@ -112,7 +116,8 @@ describe('config onchainMaxStaleness handling', () => {
         },
         "oracle": {
           "onchainPrimary": true,
-          "onchainAddress": "0x0000000000000000000000000000000000000002",
+          "onchainCollateralAddress": "0x0000000000000000000000000000000000000002",
+          "onchainQuoteAddress": "0x0000000000000000000000000000000000000002",
           "onchainMaxStaleness": 0,
           "fixedPrice": null
         },

@@ -23,6 +23,7 @@ type ArkConfig = {
 type RawConfig = {
   chainId: number;
   quoteTokenAddress: string;
+  collateralTokenAddress?: string;
   metavaultAddress?: string;
 
   keeper: {
@@ -35,7 +36,8 @@ type RawConfig = {
   oracle: {
     apiUrl?: string;
     onchainPrimary: boolean;
-    onchainAddress?: string;
+    onchainCollateralAddress?: string;
+    onchainQuoteAddress?: string;
     onchainMaxStaleness?: number | null;
     offchainMaxStaleness?: number;
     fixedPrice: string | null;
@@ -106,6 +108,12 @@ requireObject(raw, 'root');
 requireSafeInteger(raw.chainId, 'chainId', { min: 1 });
 const quoteTokenAddress = requireAddress(raw.quoteTokenAddress, 'quoteTokenAddress');
 
+const collateralTokenAddress = normalizeOptionalAddress(
+  raw.collateralTokenAddress,
+  'collateralTokenAddress',
+);
+raw.collateralTokenAddress = collateralTokenAddress;
+
 const metavaultAddress = normalizeOptionalAddress(raw.metavaultAddress, 'metavaultAddress');
 raw.metavaultAddress = metavaultAddress;
 
@@ -166,6 +174,9 @@ export const config = {
   remoteSigner: raw.remoteSigner as Required<NonNullable<RawConfig['remoteSigner']>>,
   subgraph: raw.subgraph as Required<NonNullable<RawConfig['subgraph']>>,
   quoteTokenAddress: quoteTokenAddress.toLowerCase() as Address,
+  collateralTokenAddress: (collateralTokenAddress
+    ? collateralTokenAddress.toLowerCase()
+    : undefined) as Address | undefined,
   metavaultAddress: (metavaultAddress || undefined) as Address | undefined,
   defaultGas: BigInt(raw.transaction.defaultGas!),
   gasBuffer: BigInt(raw.transaction.gasBuffer!),
@@ -199,8 +210,16 @@ function validateOracle(c: RawConfig): void {
 
   if (c.oracle.apiUrl !== undefined) requireString(c.oracle.apiUrl, 'oracle.apiUrl');
 
-  if (c.oracle.onchainAddress !== undefined) {
-    requireAddress(c.oracle.onchainAddress, 'oracle.onchainAddress');
+  if (c.oracle.onchainCollateralAddress !== undefined) {
+    requireAddress(c.oracle.onchainCollateralAddress, 'oracle.onchainCollateralAddress');
+  }
+  if (c.oracle.onchainQuoteAddress !== undefined) {
+    requireAddress(c.oracle.onchainQuoteAddress, 'oracle.onchainQuoteAddress');
+  }
+  if (Boolean(c.oracle.onchainCollateralAddress) !== Boolean(c.oracle.onchainQuoteAddress)) {
+    throwConfigError(
+      'oracle.onchainCollateralAddress and oracle.onchainQuoteAddress must be set together',
+    );
   }
 
   if (c.oracle.fixedPrice !== null && c.oracle.fixedPrice !== undefined) {
@@ -214,15 +233,23 @@ function validateOracle(c: RawConfig): void {
     c.oracle.fixedPrice = null;
   }
 
+  if (c.oracle.apiUrl && !c.collateralTokenAddress) {
+    throwConfigError('collateralTokenAddress is required when oracle.apiUrl is set');
+  }
+
   if (!c.oracle.onchainPrimary && c.oracle.fixedPrice == null && !c.oracle.apiUrl) {
     throwConfigError(
       'oracle.apiUrl is required when onchainPrimary is false and fixedPrice is not set',
     );
   }
 
-  const hasOnchainOracle = Boolean(c.oracle.onchainAddress);
+  const hasOnchainOracle = Boolean(
+    c.oracle.onchainCollateralAddress && c.oracle.onchainQuoteAddress,
+  );
   if (c.oracle.onchainPrimary && !hasOnchainOracle) {
-    throwConfigError('oracle.onchainAddress is required when onchainPrimary is true');
+    throwConfigError(
+      'oracle.onchainCollateralAddress and oracle.onchainQuoteAddress are required when onchainPrimary is true',
+    );
   }
 
   if (c.oracle.onchainMaxStaleness === undefined) {

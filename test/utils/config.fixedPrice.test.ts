@@ -17,7 +17,8 @@ describe('config fixedPrice validation', () => {
         },
         "oracle": {
           "onchainPrimary": true,
-          "onchainAddress": "0x0000000000000000000000000000000000000002",
+          "onchainCollateralAddress": "0x0000000000000000000000000000000000000002",
+          "onchainQuoteAddress": "0x0000000000000000000000000000000000000002",
           "onchainMaxStaleness": null,
           "fixedPrice": 0.999870478245824934
         },
