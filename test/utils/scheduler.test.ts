@@ -115,17 +115,21 @@ describe('runKeeperInterval', () => {
     );
   });
 
-  it('leaves metavault failures to the outer scheduler failure boundary', async () => {
+  it('isolates metavault failures so ARK runs still execute', async () => {
     const failure = new Error('metavault failure');
     const metavaultRun = vi.fn().mockRejectedValue(failure);
 
-    const { runKeeperInterval, arkRun } = await setupScheduler({
+    const { runKeeperInterval, arkRun, log } = await setupScheduler({
       arks: [ark(firstArk)],
       metavaultAddress: firstArk,
       metavaultRun,
     });
 
-    await expect(runKeeperInterval()).rejects.toThrow('metavault failure');
-    expect(arkRun).not.toHaveBeenCalled();
+    await expect(runKeeperInterval()).resolves.toBeUndefined();
+    expect(arkRun).toHaveBeenCalledWith(firstArk, firstArk, settings);
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'metavault_run_failed', err: failure }),
+      expect.any(String),
+    );
   });
 });

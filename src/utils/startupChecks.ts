@@ -72,10 +72,24 @@ async function verifyMetavaultDeployment(metavaultAddress: Address): Promise<voi
 
   for (const [i, ark] of config.arks.entries()) {
     const vaultAuth = contract('vaultAuth', ark.vaultAuthAddress)();
-    const bufferRatio = (await vaultAuth.read.bufferRatio()) as bigint;
+    const [bufferRatio, tax, toll] = (await Promise.all([
+      vaultAuth.read.bufferRatio(),
+      vaultAuth.read.tax(),
+      vaultAuth.read.toll(),
+    ])) as [bigint, bigint, bigint];
     if (bufferRatio !== 0n) {
       throw new Error(
         `metavault-managed arks[${i}] (${ark.vaultAddress}) has non-zero bufferRatio ${bufferRatio}; managed arks must use bufferRatio 0`,
+      );
+    }
+    if (tax !== 0n) {
+      throw new Error(
+        `metavault-managed arks[${i}] (${ark.vaultAddress}) has non-zero tax ${tax}; managed arks must use tax 0`,
+      );
+    }
+    if (toll !== 0n) {
+      throw new Error(
+        `metavault-managed arks[${i}] (${ark.vaultAddress}) has non-zero toll ${toll}; managed arks must use toll 0`,
       );
     }
   }

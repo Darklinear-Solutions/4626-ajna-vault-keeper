@@ -3,11 +3,9 @@ import { config } from '../utils/config.ts';
 import { toAsset } from '../utils/decimalConversion.ts';
 import { getOffchainPrice } from './offchain.ts';
 import { getOnchainPrice } from './onchain.ts';
-import { AJNA_MAX_PRICE, AJNA_MIN_PRICE } from '../ajna/constants.ts';
+import { AJNA_MAX_PRICE, AJNA_MIN_PRICE, AJNA_PRICE_DECIMALS } from '../ajna/constants.ts';
 
-const AJNA_PRICE_DECIMALS = 18;
-
-type PriceSource = () => Promise<bigint | string>;
+type PriceSource = () => Promise<bigint>;
 
 const SOURCES: Record<'onchain' | 'offchain', PriceSource> = {
   onchain: getOnchainPrice,
@@ -25,10 +23,8 @@ export async function getPrice(): Promise<bigint> {
   for (const tag of order) {
     try {
       const price = await SOURCES[tag]();
-      const normalizedPrice =
-        typeof price === 'bigint' ? price : toAsset(price, AJNA_PRICE_DECIMALS);
-      validateLivePrice(normalizedPrice, tag);
-      return normalizedPrice;
+      validateLivePrice(price, tag);
+      return price;
     } catch (err) {
       const e = new Error(`${tag} price query failed`, { cause: err });
       errors.push(e);

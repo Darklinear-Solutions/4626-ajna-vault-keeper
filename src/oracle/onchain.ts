@@ -4,28 +4,36 @@ import { client, readOnlyClient } from '../utils/client.ts';
 import { getChainTime } from '../utils/chainTime.ts';
 import { config } from '../utils/config.ts';
 import { log } from '../utils/logger.ts';
+import { quotePerCollateralWad } from './denominate.ts';
 import type { Address } from 'viem';
 
 type OracleData = readonly [bigint, bigint];
+type ChronicleFeed = 'chronicleCollateral' | 'chronicleQuote';
 
 const FUTURE_SKEW_TOLERANCE_SECS = BigInt(config.oracle.futureSkewTolerance);
 
 export async function getOnchainPrice(): Promise<bigint> {
-  if (!config.oracle.onchainAddress) throw new Error('onchain oracle address is undefined');
+  if (!config.oracle.onchainCollateralAddress || !config.oracle.onchainQuoteAddress) {
+    throw new Error('onchain oracle addresses are undefined');
+  }
 
-  const [price, rawAge] = await _queryChronicle();
+  const [[collateralUsd, collateralAge], [quoteUsd, quoteAge]] = await Promise.all([
+    _queryChronicle('chronicleCollateral'),
+    _queryChronicle('chronicleQuote'),
+  ]);
   const latestBlockTimestamp = await getChainTime();
-  const age = latestBlockTimestamp - rawAge;
 
-  checkForFutureTimestamp(rawAge, latestBlockTimestamp);
-  checkForStaleTimestamp(age);
+  for (const rawAge of [collateralAge, quoteAge]) {
+    checkForFutureTimestamp(rawAge, latestBlockTimestamp);
+    checkForStaleTimestamp(latestBlockTimestamp - rawAge);
+  }
 
-  return price;
+  return quotePerCollateralWad(collateralUsd, quoteUsd);
 }
 
-export async function _queryChronicle(): Promise<OracleData> {
+export async function _queryChronicle(feed: ChronicleFeed): Promise<OracleData> {
   const queryData = {
-    address: (await getAddress('chronicle')) as Address,
+    address: (await getAddress(feed)) as Address,
     abi: getAbi('chronicle'),
     functionName: 'readWithAge',
   } as const;

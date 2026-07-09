@@ -27,7 +27,12 @@ function makeConfig(overrides: ConfigOverrides = {}): unknown {
     chainId: 1,
     quoteTokenAddress: A1,
     keeper: { intervalMs: 60000, haltIfLupBelowHtp: true },
-    oracle: { onchainPrimary: true, onchainAddress: A2, fixedPrice: null },
+    oracle: {
+      onchainPrimary: true,
+      onchainCollateralAddress: A2,
+      onchainQuoteAddress: A2,
+      fixedPrice: null,
+    },
     arkGlobal: { optimalBucketDiff: 1 },
     transaction: { confirmations: 1 },
     arks: [],
@@ -115,14 +120,19 @@ describe('config: address validation', () => {
     );
   });
 
-  it('rejects malformed oracle.onchainAddress when provided', async () => {
+  it('rejects malformed oracle.onchainCollateralAddress when provided', async () => {
     mockConfigFs(
       makeConfig({
-        oracle: { onchainPrimary: false, onchainAddress: 'notanaddress', fixedPrice: '1.00' },
+        oracle: {
+          onchainPrimary: false,
+          onchainCollateralAddress: 'notanaddress',
+          onchainQuoteAddress: A2,
+          fixedPrice: '1.00',
+        },
       }),
     );
     await expect(import('../../src/utils/config.ts')).rejects.toThrow(
-      'config.json: oracle.onchainAddress must be a valid 0x-prefixed 20-byte address',
+      'config.json: oracle.onchainCollateralAddress must be a valid 0x-prefixed 20-byte address',
     );
   });
 });
@@ -168,7 +178,12 @@ describe('config: oracle section', () => {
   it('rejects non-boolean onchainPrimary', async () => {
     mockConfigFs(
       makeConfig({
-        oracle: { onchainPrimary: 'true', onchainAddress: A2, fixedPrice: null },
+        oracle: {
+          onchainPrimary: 'true',
+          onchainCollateralAddress: A2,
+          onchainQuoteAddress: A2,
+          fixedPrice: null,
+        },
       }),
     );
     await expect(import('../../src/utils/config.ts')).rejects.toThrow(
@@ -181,7 +196,8 @@ describe('config: oracle section', () => {
       makeConfig({
         oracle: {
           onchainPrimary: true,
-          onchainAddress: A2,
+          onchainCollateralAddress: A2,
+          onchainQuoteAddress: A2,
           fixedPrice: null,
           futureSkewTolerance: -5,
         },
@@ -197,7 +213,8 @@ describe('config: oracle section', () => {
       makeConfig({
         oracle: {
           onchainPrimary: true,
-          onchainAddress: A2,
+          onchainCollateralAddress: A2,
+          onchainQuoteAddress: A2,
           fixedPrice: null,
           futureSkewTolerance: 0,
         },
@@ -218,7 +235,8 @@ describe('config: oracle section', () => {
       makeConfig({
         oracle: {
           onchainPrimary: true,
-          onchainAddress: A2,
+          onchainCollateralAddress: A2,
+          onchainQuoteAddress: A2,
           fixedPrice: null,
           offchainMaxStaleness: 0,
         },
@@ -762,7 +780,7 @@ describe('config: numeric edge cases', () => {
       "chainId": 9007199254740993,
       "quoteTokenAddress": "${A1}",
       "keeper": { "intervalMs": 1, "haltIfLupBelowHtp": true },
-      "oracle": { "onchainPrimary": true, "onchainAddress": "${A2}", "fixedPrice": null },
+      "oracle": { "onchainPrimary": true, "onchainCollateralAddress": "${A2}", "onchainQuoteAddress": "${A2}", "fixedPrice": null },
       "arkGlobal": { "optimalBucketDiff": 1 },
       "transaction": { "confirmations": 1 },
       "arks": [],

@@ -20,6 +20,8 @@ type ContractCall = (...args: unknown[]) => unknown;
 function buildContractMock(opts: {
   metavault: MetavaultStub;
   bufferRatioByAuth: Record<string, bigint>;
+  taxByAuth: Record<string, bigint>;
+  tollByAuth: Record<string, bigint>;
 }) {
   return (name: string, address: string) => {
     if (name === 'metavault') {
@@ -45,6 +47,8 @@ function buildContractMock(opts: {
       return () => ({
         read: {
           bufferRatio: (() => opts.bufferRatioByAuth[address.toLowerCase()] ?? 0n) as ContractCall,
+          tax: (() => opts.taxByAuth[address.toLowerCase()] ?? 0n) as ContractCall,
+          toll: (() => opts.tollByAuth[address.toLowerCase()] ?? 0n) as ContractCall,
         },
       });
     }
@@ -83,6 +87,8 @@ async function loadStartupChecks(opts: {
   chainId?: number;
   metavault?: Partial<MetavaultStub>;
   bufferRatioByAuth?: Record<string, bigint>;
+  taxByAuth?: Record<string, bigint>;
+  tollByAuth?: Record<string, bigint>;
 }) {
   const cfg = { ...configWithMetavault(), ...opts.configOverrides };
 
@@ -101,7 +107,12 @@ async function loadStartupChecks(opts: {
     readOnlyClient: { getChainId: async () => opts.chainId ?? 1 },
   }));
   vi.doMock('../../src/utils/contract.ts', () => ({
-    contract: buildContractMock({ metavault, bufferRatioByAuth: opts.bufferRatioByAuth ?? {} }),
+    contract: buildContractMock({
+      metavault,
+      bufferRatioByAuth: opts.bufferRatioByAuth ?? {},
+      taxByAuth: opts.taxByAuth ?? {},
+      tollByAuth: opts.tollByAuth ?? {},
+    }),
   }));
   vi.doMock('../../src/utils/logger.ts', () => ({ log: { info: vi.fn(), warn: vi.fn() } }));
 
@@ -241,6 +252,32 @@ describe('runStartupChecks: managed ark buffer ratio', () => {
   it('passes when the managed ark has a zero buffer ratio', async () => {
     const run = await loadStartupChecks({
       bufferRatioByAuth: { [VAULT_AUTH_1]: 0n },
+    });
+    await expect(run()).resolves.toBeUndefined();
+  });
+});
+
+describe('runStartupChecks: managed ark fees', () => {
+  it('throws when a managed ark has a non-zero tax', async () => {
+    const run = await loadStartupChecks({
+      taxByAuth: { [VAULT_AUTH_1]: 50n },
+    });
+    await expect(run()).rejects.toThrow(`metavault-managed arks[0] (${ARK_1}) has non-zero tax 50`);
+  });
+
+  it('throws when a managed ark has a non-zero toll', async () => {
+    const run = await loadStartupChecks({
+      tollByAuth: { [VAULT_AUTH_1]: 50n },
+    });
+    await expect(run()).rejects.toThrow(
+      `metavault-managed arks[0] (${ARK_1}) has non-zero toll 50`,
+    );
+  });
+
+  it('passes when tax and toll are both zero', async () => {
+    const run = await loadStartupChecks({
+      taxByAuth: { [VAULT_AUTH_1]: 0n },
+      tollByAuth: { [VAULT_AUTH_1]: 0n },
     });
     await expect(run()).resolves.toBeUndefined();
   });

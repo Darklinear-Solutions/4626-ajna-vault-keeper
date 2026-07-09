@@ -9,12 +9,38 @@ const redact = [
   'env.REMOTE_SIGNER_TLS_CLIENT_KEY_PASSWORD',
   'env.RPC_URL',
 ];
+
+const URL_PATTERN = /https?:\/\/[^\s"'<>]+/gi;
+const SENSITIVE_ERROR_KEYS = new Set(['url', 'headers', 'body', 'raw']);
+
+function maskSecrets(value: unknown, seen: WeakSet<object>): unknown {
+  if (typeof value === 'string') return value.replace(URL_PATTERN, '[redacted-url]');
+  if (Array.isArray(value)) return value.map((entry) => maskSecrets(entry, seen));
+  if (value !== null && typeof value === 'object') {
+    if (seen.has(value)) return undefined;
+    seen.add(value);
+    const masked: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (SENSITIVE_ERROR_KEYS.has(key)) continue;
+      masked[key] = maskSecrets(entry, seen);
+    }
+    return masked;
+  }
+  return value;
+}
+
+export function serializeError(err: unknown): unknown {
+  return maskSecrets(pino.stdSerializers.err(err as Error), new WeakSet());
+}
+
+const serializers = { err: serializeError, error: serializeError };
 const destination = pino.destination({ sync: true });
 
 export const log = pino(
   {
     level: config.keeper.logLevel ?? 'info',
     redact,
+    serializers,
   },
   destination,
 );
@@ -24,6 +50,7 @@ export const startupNoticeLog = pino(
   {
     level: 'warn',
     redact,
+    serializers,
   },
   destination,
 );

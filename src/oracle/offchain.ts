@@ -1,10 +1,13 @@
 import { env } from '../utils/env.ts';
 import { config } from '../utils/config.ts';
+import { toAsset } from '../utils/decimalConversion.ts';
+import { AJNA_PRICE_DECIMALS } from '../ajna/constants.ts';
+import { quotePerCollateralWad } from './denominate.ts';
 
 const tier = env.ORACLE_API_TIER ?? 'none';
 const key = env.ORACLE_API_KEY ?? '';
 const MAX_OFFCHAIN_PRICE_LITERAL_LENGTH = 64;
-const DECIMAL_PRICE_LITERAL = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+const DECIMAL_PRICE_LITERAL = /^(?:0|[1-9]\d*)(?:\.\d+)?$/;
 const INTEGER_LITERAL = /^(?:0|[1-9]\d*)$/;
 
 type JsonParseReviver = (
@@ -24,20 +27,30 @@ const headers: Record<string, string> = {
   ...(tier === 'pro' && key && { 'x-cg-pro-api-key': key }),
 };
 
-export async function getOffchainPrice(): Promise<string> {
-  const address = config.quoteTokenAddress;
+export async function getOffchainPrice(): Promise<bigint> {
+  const collateralAddress = config.collateralTokenAddress;
+  if (!collateralAddress) throw new Error('collateralTokenAddress is not configured');
 
-  const res = await fetch(_priceUrl(), { method: 'GET', headers });
+  const res = await fetch(_priceUrl(), {
+    method: 'GET',
+    headers,
+    signal: AbortSignal.timeout(config.oracle.requestTimeoutMs),
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const body = await res.text();
-  const price = _extractUsdPrice(body, address);
-  if (price == null) {
+  const collateral = _extractUsdPrice(body, collateralAddress);
+  const quote = _extractUsdPrice(body, config.quoteTokenAddress);
+  if (collateral == null || quote == null) {
     throw new Error('price is undefined or could not be parsed exactly');
   }
-  _checkFreshness(price.lastUpdatedAt);
+  _checkFreshness(collateral.lastUpdatedAt);
+  _checkFreshness(quote.lastUpdatedAt);
 
-  return price.usd;
+  return quotePerCollateralWad(
+    toAsset(collateral.usd, AJNA_PRICE_DECIMALS),
+    toAsset(quote.usd, AJNA_PRICE_DECIMALS),
+  );
 }
 
 function _priceUrl(): string {

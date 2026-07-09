@@ -36,7 +36,8 @@ describe('logStartupWarnings', () => {
           exitOnSubgraphFailure: false,
         },
         oracle: {
-          onchainAddress: '0x0000000000000000000000000000000000000002',
+          onchainCollateralAddress: '0x0000000000000000000000000000000000000002',
+          onchainQuoteAddress: '0x0000000000000000000000000000000000000003',
           onchainPrimary: true,
           onchainMaxStaleness: null,
           fixedPrice: '1.00',
@@ -106,7 +107,8 @@ describe('logStartupWarnings', () => {
           exitOnSubgraphFailure: true,
         },
         oracle: {
-          onchainAddress: '0x0000000000000000000000000000000000000002',
+          onchainCollateralAddress: '0x0000000000000000000000000000000000000002',
+          onchainQuoteAddress: '0x0000000000000000000000000000000000000003',
           onchainPrimary: false,
           onchainMaxStaleness: null,
           fixedPrice: null,
@@ -126,7 +128,7 @@ describe('logStartupWarnings', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({
         event: 'oracle_staleness_check_disabled',
-        onchainAddress: '0x0000000000000000000000000000000000000002',
+        onchainCollateralAddress: '0x0000000000000000000000000000000000000002',
         onchainPrimary: false,
       }),
       expect.stringContaining('staleness checking is disabled'),
@@ -240,6 +242,45 @@ describe('logStartupWarnings', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.objectContaining({ event: 'remote_signer_insecure_transport', tokenExposed: true }),
       expect.stringContaining('bearer token'),
+    );
+  });
+
+  it('warns when the oracle denomination is degenerate (collateral equals quote)', async () => {
+    const warn = vi.fn();
+
+    vi.doMock('../../src/utils/config.ts', () => ({
+      config: {
+        keeper: {
+          exitOnSubgraphFailure: true,
+        },
+        quoteTokenAddress: '0x0000000000000000000000000000000000000004',
+        collateralTokenAddress: '0x0000000000000000000000000000000000000004',
+        oracle: {
+          onchainCollateralAddress: '0x0000000000000000000000000000000000000005',
+          onchainQuoteAddress: '0x0000000000000000000000000000000000000005',
+          onchainPrimary: true,
+          onchainMaxStaleness: 86400,
+          fixedPrice: null,
+        },
+      },
+    }));
+    mockEnv();
+    vi.doMock('../../src/utils/logger.ts', () => ({
+      startupNoticeLog: { warn },
+    }));
+
+    const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
+
+    logStartupWarnings();
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'oracle_denomination_degenerate', source: 'offchain' }),
+      expect.stringContaining('constant 1.0'),
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'oracle_denomination_degenerate', source: 'onchain' }),
+      expect.stringContaining('constant 1.0'),
     );
   });
 });

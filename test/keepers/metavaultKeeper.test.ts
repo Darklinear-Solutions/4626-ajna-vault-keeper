@@ -510,6 +510,33 @@ describe('_reallocateForRates', () => {
     expect(arks[1]!.assets).toBe(200n * S);
   });
 
+  it('does not supply a target whose real balance exceeds max even when its pool-capped balance is low', () => {
+    // B lends into an illiquid pool: only 20*S of its quote is currently withdrawable
+    // (its pool-capped working balance), but it really holds 250*S, already over its
+    // 20% (200*S) max. It must receive nothing despite the low working balance.
+    const arks = [
+      makeArk({ id: ADDR_A, assets: 200n * S, min: 5, max: 20, rate: 100n }),
+      makeArk({
+        id: ADDR_B,
+        assets: 20n * S,
+        initialAssets: 20n * S,
+        realInitialAssets: 250n * S,
+        min: 5,
+        max: 20,
+        rate: 200n,
+      }),
+    ];
+    const evaluations: ArkEvaluation[] = [
+      { address: ADDR_A, targets: [ADDR_B] },
+      { address: ADDR_B, targets: [] },
+    ];
+
+    _reallocateForRates(arks, evaluations, 1000n * S);
+
+    expect(arks[0]!.assets).toBe(200n * S);
+    expect(arks[1]!.assets).toBe(20n * S);
+  });
+
   it('processes arks lowest to highest rate', () => {
     // A(rate=100) should be processed before C(rate=200)
     const arks = [
@@ -697,13 +724,26 @@ describe('_validateAllocations', () => {
     expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
-  it('returns error when ark is above max', () => {
+  it('returns error when planned supply pushes an ark above max', () => {
     const arks = [
-      makeArk({ id: ADDR_A, assets: 250n * S, min: 5, max: 20 }), // 250*S > 200*S (20%)
+      // starts at 50*S, plan supplies up to 250*S: 250*S > 200*S (20%)
+      makeArk({ id: ADDR_A, assets: 250n * S, initialAssets: 50n * S, min: 5, max: 20 }),
     ];
     const buffer = makeBuffer({ assets: 400n * S });
 
     expect(_validateAllocations(arks, buffer, totalAssets)).toContain('above max');
+  });
+
+  it('does not flag a pre-existing over-max ark the plan did not supply into', () => {
+    // An ark can drift over its max externally (interest accrual or a direct deposit).
+    // The keeper cannot reduce an illiquid position here, so it must not wedge the whole
+    // reallocation; only a plan that actively supplies past max is a validation failure.
+    const arks = [
+      makeArk({ id: ADDR_A, assets: 250n * S, initialAssets: 250n * S, min: 5, max: 20 }),
+    ];
+    const buffer = makeBuffer({ assets: 400n * S });
+
+    expect(_validateAllocations(arks, buffer, totalAssets)).toBeNull();
   });
 
   it('returns error when planned supply exceeds the live supply cap', () => {

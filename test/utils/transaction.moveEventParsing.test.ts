@@ -67,7 +67,10 @@ function setupMocks(receipt: { status: 'success' | 'reverted'; logs: Log[]; bloc
       metavaultAddress: '0x00000000000000000000000000000000000000e5',
       transaction: { confirmations: 1 },
       keeper: { haltIfLupBelowHtp: false },
-      oracle: { onchainAddress: '0x00000000000000000000000000000000000000f6' },
+      oracle: {
+        onchainCollateralAddress: '0x00000000000000000000000000000000000000f6',
+        onchainQuoteAddress: '0x00000000000000000000000000000000000000f6',
+      },
       defaultGas: 0n,
       gasBuffer: 0n,
     },

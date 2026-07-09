@@ -23,6 +23,7 @@ type ArkConfig = {
 type RawConfig = {
   chainId: number;
   quoteTokenAddress: string;
+  collateralTokenAddress?: string;
   metavaultAddress?: string;
 
   keeper: {
@@ -35,11 +36,13 @@ type RawConfig = {
   oracle: {
     apiUrl?: string;
     onchainPrimary: boolean;
-    onchainAddress?: string;
+    onchainCollateralAddress?: string;
+    onchainQuoteAddress?: string;
     onchainMaxStaleness?: number | null;
     offchainMaxStaleness?: number;
     fixedPrice: string | null;
     futureSkewTolerance?: number;
+    requestTimeoutMs?: number;
   };
 
   arkGlobal: {
@@ -60,6 +63,10 @@ type RawConfig = {
     requestTimeoutMs?: number;
   };
 
+  subgraph?: {
+    requestTimeoutMs?: number;
+  };
+
   arks: ArkConfig[];
   buffer: {
     address: Address;
@@ -73,6 +80,8 @@ type RawConfig = {
 export const DEFAULT_ONCHAIN_MAX_STALENESS = 86400;
 export const DEFAULT_OFFCHAIN_MAX_STALENESS = 86400;
 export const DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS = 30000;
+export const DEFAULT_ORACLE_REQUEST_TIMEOUT_MS = 10000;
+export const DEFAULT_SUBGRAPH_REQUEST_TIMEOUT_MS = 10000;
 export const DEFAULT_FUTURE_SKEW_TOLERANCE = 120;
 const DEFAULT_BUFFER_PADDING = '100000000000000';
 const DEFAULT_MIN_MOVE_AMOUNT = '1000001';
@@ -99,6 +108,12 @@ requireObject(raw, 'root');
 requireSafeInteger(raw.chainId, 'chainId', { min: 1 });
 const quoteTokenAddress = requireAddress(raw.quoteTokenAddress, 'quoteTokenAddress');
 
+const collateralTokenAddress = normalizeOptionalAddress(
+  raw.collateralTokenAddress,
+  'collateralTokenAddress',
+);
+raw.collateralTokenAddress = collateralTokenAddress;
+
 const metavaultAddress = normalizeOptionalAddress(raw.metavaultAddress, 'metavaultAddress');
 raw.metavaultAddress = metavaultAddress;
 
@@ -107,6 +122,7 @@ validateOracle(raw);
 validateArkGlobal(raw);
 validateTransaction(raw);
 validateRemoteSigner(raw);
+validateSubgraph(raw);
 validateBuffer(raw);
 validateArks(raw);
 validateAllocationSum(raw);
@@ -141,11 +157,12 @@ export function resolveArkSettings(ark: ArkConfig): ResolvedArkSettings {
 
 type ResolvedOracleConfig = Omit<
   RawConfig['oracle'],
-  'onchainMaxStaleness' | 'offchainMaxStaleness' | 'futureSkewTolerance'
+  'onchainMaxStaleness' | 'offchainMaxStaleness' | 'futureSkewTolerance' | 'requestTimeoutMs'
 > & {
   onchainMaxStaleness: number | null;
   offchainMaxStaleness: number;
   futureSkewTolerance: number;
+  requestTimeoutMs: number;
 };
 
 export const config = {
@@ -155,7 +172,11 @@ export const config = {
   arkGlobal: raw.arkGlobal as Required<RawConfig['arkGlobal']>,
   transaction: raw.transaction as Required<RawConfig['transaction']>,
   remoteSigner: raw.remoteSigner as Required<NonNullable<RawConfig['remoteSigner']>>,
+  subgraph: raw.subgraph as Required<NonNullable<RawConfig['subgraph']>>,
   quoteTokenAddress: quoteTokenAddress.toLowerCase() as Address,
+  collateralTokenAddress: (collateralTokenAddress
+    ? collateralTokenAddress.toLowerCase()
+    : undefined) as Address | undefined,
   metavaultAddress: (metavaultAddress || undefined) as Address | undefined,
   defaultGas: BigInt(raw.transaction.defaultGas!),
   gasBuffer: BigInt(raw.transaction.gasBuffer!),
@@ -189,8 +210,16 @@ function validateOracle(c: RawConfig): void {
 
   if (c.oracle.apiUrl !== undefined) requireString(c.oracle.apiUrl, 'oracle.apiUrl');
 
-  if (c.oracle.onchainAddress !== undefined) {
-    requireAddress(c.oracle.onchainAddress, 'oracle.onchainAddress');
+  if (c.oracle.onchainCollateralAddress !== undefined) {
+    requireAddress(c.oracle.onchainCollateralAddress, 'oracle.onchainCollateralAddress');
+  }
+  if (c.oracle.onchainQuoteAddress !== undefined) {
+    requireAddress(c.oracle.onchainQuoteAddress, 'oracle.onchainQuoteAddress');
+  }
+  if (Boolean(c.oracle.onchainCollateralAddress) !== Boolean(c.oracle.onchainQuoteAddress)) {
+    throwConfigError(
+      'oracle.onchainCollateralAddress and oracle.onchainQuoteAddress must be set together',
+    );
   }
 
   if (c.oracle.fixedPrice !== null && c.oracle.fixedPrice !== undefined) {
@@ -204,15 +233,23 @@ function validateOracle(c: RawConfig): void {
     c.oracle.fixedPrice = null;
   }
 
+  if (c.oracle.apiUrl && !c.collateralTokenAddress) {
+    throwConfigError('collateralTokenAddress is required when oracle.apiUrl is set');
+  }
+
   if (!c.oracle.onchainPrimary && c.oracle.fixedPrice == null && !c.oracle.apiUrl) {
     throwConfigError(
       'oracle.apiUrl is required when onchainPrimary is false and fixedPrice is not set',
     );
   }
 
-  const hasOnchainOracle = Boolean(c.oracle.onchainAddress);
+  const hasOnchainOracle = Boolean(
+    c.oracle.onchainCollateralAddress && c.oracle.onchainQuoteAddress,
+  );
   if (c.oracle.onchainPrimary && !hasOnchainOracle) {
-    throwConfigError('oracle.onchainAddress is required when onchainPrimary is true');
+    throwConfigError(
+      'oracle.onchainCollateralAddress and oracle.onchainQuoteAddress are required when onchainPrimary is true',
+    );
   }
 
   if (c.oracle.onchainMaxStaleness === undefined) {
@@ -244,6 +281,21 @@ function validateOracle(c: RawConfig): void {
     requireSafeInteger(c.oracle.futureSkewTolerance, 'oracle.futureSkewTolerance', { min: 0 });
   }
   c.oracle.futureSkewTolerance ??= DEFAULT_FUTURE_SKEW_TOLERANCE;
+
+  if (c.oracle.requestTimeoutMs !== undefined) {
+    requireSafeInteger(
+      c.oracle.requestTimeoutMs,
+      'oracle.requestTimeoutMs',
+      { min: 1 },
+      { detail: 'must be a positive integer' },
+    );
+    if (c.oracle.requestTimeoutMs > c.keeper.intervalMs) {
+      throwConfigError(
+        `oracle.requestTimeoutMs (${c.oracle.requestTimeoutMs}) must not exceed keeper.intervalMs (${c.keeper.intervalMs})`,
+      );
+    }
+  }
+  c.oracle.requestTimeoutMs ??= DEFAULT_ORACLE_REQUEST_TIMEOUT_MS;
 }
 
 function validateArkGlobal(c: RawConfig): void {
@@ -308,6 +360,28 @@ function validateRemoteSigner(c: RawConfig): void {
   }
   c.remoteSigner ??= {};
   c.remoteSigner.requestTimeoutMs ??= DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS;
+}
+
+function validateSubgraph(c: RawConfig): void {
+  if (c.subgraph !== undefined) {
+    requireObject(c.subgraph, 'subgraph');
+
+    if (c.subgraph.requestTimeoutMs !== undefined) {
+      requireSafeInteger(
+        c.subgraph.requestTimeoutMs,
+        'subgraph.requestTimeoutMs',
+        { min: 1 },
+        { detail: 'must be a positive integer' },
+      );
+      if (c.subgraph.requestTimeoutMs > c.keeper.intervalMs) {
+        throwConfigError(
+          `subgraph.requestTimeoutMs (${c.subgraph.requestTimeoutMs}) must not exceed keeper.intervalMs (${c.keeper.intervalMs})`,
+        );
+      }
+    }
+  }
+  c.subgraph ??= {};
+  c.subgraph.requestTimeoutMs ??= DEFAULT_SUBGRAPH_REQUEST_TIMEOUT_MS;
 }
 
 function validateBuffer(c: RawConfig): void {

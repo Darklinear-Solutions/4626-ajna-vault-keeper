@@ -200,8 +200,9 @@ export function _validateAllocations(
     if (ark.assets + tolerance < minAssets && !bufferAtTarget) {
       return `Ark ${ark.id} allocation ${ark.assets} is below min ${minAssets}`;
     }
-    if (ark.assets > maxAssets + tolerance) {
-      return `Ark ${ark.id} allocation ${ark.assets} is above max ${maxAssets}`;
+    const projectedAssets = projectedRealAssets(ark);
+    if (plannedSupply(ark) > 0n && projectedAssets > maxAssets + tolerance) {
+      return `Ark ${ark.id} allocation ${projectedAssets} is above max ${maxAssets}`;
     }
     const supplyCapError = supplyCapErrorMessage('Ark', ark.id, ark);
     if (supplyCapError) return supplyCapError;
@@ -369,8 +370,13 @@ function remainingSupplyCapacity(allocation: SupplyCappedAllocation): bigint {
   return ceiling > allocation.assets ? ceiling - allocation.assets : 0n;
 }
 
+function projectedRealAssets(allocation: SupplyCappedAllocation): bigint {
+  return allocation.assets + allocation.realInitialAssets - allocation.initialAssets;
+}
+
 function receivableCapacity(allocation: SupplyCappedAllocation, maxAssets: bigint): bigint {
-  const room = maxAssets > allocation.assets ? maxAssets - allocation.assets : 0n;
+  const projected = projectedRealAssets(allocation);
+  const room = maxAssets > projected ? maxAssets - projected : 0n;
   return min(room, remainingSupplyCapacity(allocation));
 }
 
