@@ -16,7 +16,7 @@ export async function selectBuckets(
     (buckets as bigint[]).map(async (bucket: bigint) => ({
       bucket,
       value: await vault.lpToValue(bucket),
-      lps: await vault.getBucketLps(bucket),
+      lps: await vault.getVaultBucketLps(bucket),
       price: await vault.getIndexToPrice(bucket),
     })),
   );
@@ -67,7 +67,7 @@ export function _wouldLeaveDust(
   dustThreshold: bigint,
 ): boolean {
   if (amount >= bucketValue) return false;
-  const lpsRemoved = (bucketLps * amount) / bucketValue;
-  const remainingLps = bucketLps - lpsRemoved;
+  const lpsRemoved = (bucketLps * amount + bucketValue - 1n) / bucketValue;
+  const remainingLps = bucketLps > lpsRemoved ? bucketLps - lpsRemoved : 0n;
   return remainingLps > 0n && remainingLps < dustThreshold;
 }

@@ -93,6 +93,10 @@ export function createVault(address: Address, vaultAuthAddress?: Address) {
       const bucketInfo = await (await getPool()).read.bucketInfo([index]);
       return (bucketInfo as any)[0];
     },
+    getVaultBucketLps: async (index: bigint) => {
+      const lenderInfo = await (await getPool()).read.lenderInfo([index, address]);
+      return BigInt((lenderInfo as any)[0]);
+    },
     updateInterest: async (gas: bigint) => (await getPool()).write.updateInterest({ gas }),
     getTotalT0DebtInAuction: async () => (await getPool()).read.totalT0DebtInAuction(),
     getInflatorInfo: async () => (await getPool()).read.inflatorInfo(),

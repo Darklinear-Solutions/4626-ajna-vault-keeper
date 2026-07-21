@@ -79,6 +79,7 @@ async function setupMetavaultRunTest({
   accrued = {},
   poolHasBadDebt = vi.fn().mockResolvedValue(false),
   haltedArks = [],
+  minMoveAmount = '1000001',
 }: {
   arkConfigs?: ArkConfig[];
   balances?: Partial<Record<Address, bigint>>;
@@ -91,6 +92,7 @@ async function setupMetavaultRunTest({
   accrued?: Partial<Record<Address, bigint>>;
   poolHasBadDebt?: (vault: { getAddress: () => Address }) => Promise<boolean>;
   haltedArks?: Address[];
+  minMoveAmount?: string;
 } = {}) {
   const vaultFixtures = {
     [ARK_A]: buildVaultFixture(ARK_A, { rate: 100n }),
@@ -140,7 +142,7 @@ async function setupMetavaultRunTest({
         fixedPrice: null,
         futureSkewTolerance: 120,
       },
-      arkGlobal: { optimalBucketDiff: 1, maxAuctionAge: 259200, minMoveAmount: '1000001' },
+      arkGlobal: { optimalBucketDiff: 1, maxAuctionAge: 259200, minMoveAmount },
       transaction: { confirmations: 1 },
       defaultGas: 3_000_000n,
       gasBuffer: 50n,
@@ -151,7 +153,7 @@ async function setupMetavaultRunTest({
     resolveArkSettings: () => ({
       optimalBucketDiff: 1n,
       bufferPadding: 0n,
-      minMoveAmount: 1_000_001n,
+      minMoveAmount: BigInt(minMoveAmount),
       minTimeSinceBankruptcy: 0n,
       maxAuctionAge: 0,
     }),
@@ -586,6 +588,45 @@ describe('metavaultRun orchestration', () => {
       ],
       3_000_000n,
     );
+  });
+
+  // Regression (PR19-D04): arkGlobal.minMoveAmount is documented and configured in WAD, but the
+  // planner compares it against Euler balances denominated in native asset decimals. For a
+  // 6-decimal asset, a 1-token threshold (1e18 WAD) was previously interpreted as 1e12 tokens,
+  // suppressing the buffer fill entirely and aborting the run on buffer-below-target validation.
+  it('converts a WAD minMoveAmount to asset decimals so valid 6-decimal moves are not suppressed', async () => {
+    const SIX_DEC = 10n ** 6n;
+    const WAD = 10n ** 18n;
+    const arkA = buildVaultFixture(ARK_A, { rate: 100n, assetDecimals: 6 });
+    const arkB = buildVaultFixture(ARK_B, { rate: 200n, assetDecimals: 6 });
+
+    const { metavaultRun, selectBuckets, reallocate, log } = await setupMetavaultRunTest({
+      minMoveAmount: WAD.toString(),
+      balances: {
+        [BUFFER]: 350n * SIX_DEC,
+        [ARK_A]: 200n * SIX_DEC,
+        [ARK_B]: 450n * SIX_DEC,
+      },
+      totalAssets: 1000n * SIX_DEC,
+      bucketPlan: [{ bucket: 4150n, amount: 50n * WAD }],
+      evaluations: [],
+      vaults: { [ARK_A]: arkA, [ARK_B]: arkB },
+    });
+
+    await metavaultRun();
+
+    // The 50-token buffer deficit is sourced from the lowest-rate ark (ARK_A). The converted
+    // threshold is 1 token (1e6), so the 50e6 deduction must not be gated.
+    expect(selectBuckets).toHaveBeenCalledWith(arkA, 50n * WAD);
+    expect(reallocate).toHaveBeenCalledOnce();
+    expect(reallocate).toHaveBeenCalledWith(
+      [
+        { id: ARK_A, assets: 150n * SIX_DEC + accrualPad(200n * SIX_DEC, 50n * SIX_DEC) },
+        { id: BUFFER, assets: maxUint256 },
+      ],
+      3_000_000n,
+    );
+    expect(log.error).not.toHaveBeenCalled();
   });
 
   it('does not count sub-token-unit WAD bucket legs as metavault pre-move coverage', async () => {

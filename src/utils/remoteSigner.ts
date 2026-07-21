@@ -57,24 +57,26 @@ function toSignableHex(message: SignableMessage): Hex {
 function getRemoteSignerTransactionType(transaction: TransactionSerializable) {
   const type = getTransactionType(transaction);
 
-  if (type === 'legacy' || type === 'eip1559' || type === 'eip2930') {
+  if (type === 'legacy' || type === 'eip1559') {
     return type;
   }
 
   throw new Error(`Remote signer does not support ${type} transactions in this keeper`);
 }
 
-function toRemoteSignerType(type: 'legacy' | 'eip1559' | 'eip2930'): Hex | undefined {
+function toRemoteSignerType(type: 'legacy' | 'eip1559'): Hex | undefined {
   if (type === 'eip1559') return '0x2';
-  if (type === 'eip2930') return '0x1';
   return undefined;
 }
 
 function toRemoteSignerTransaction(address: Address, transaction: TransactionSerializable) {
   const type = getRemoteSignerTransactionType(transaction);
 
+  if (transaction.accessList && transaction.accessList.length > 0) {
+    throw new Error('Remote signer does not support access lists in this keeper');
+  }
+
   return {
-    accessList: transaction.accessList,
     chainId: transaction.chainId != null ? toHex(transaction.chainId) : undefined,
     data: transaction.data,
     from: address,
@@ -220,6 +222,13 @@ function extractSignatureFromSignedTransaction(signedTransactionHex: Hex): Signa
     throw new Error(
       `Remote signer eth_signTransaction response is missing signature fields (r, s)`,
     );
+  }
+
+  if (parsed.type === 'legacy') {
+    if (v == null) {
+      throw new Error(`Remote signer eth_signTransaction response is missing signature fields (v)`);
+    }
+    return { r, s, v };
   }
 
   if (yParity != null) {

@@ -19,7 +19,7 @@ function makeVault(
     getIndexToPrice: vi
       .fn()
       .mockImplementation((index: bigint) => Promise.resolve(prices[index.toString()] ?? 0n)),
-    getBucketLps: vi
+    getVaultBucketLps: vi
       .fn()
       .mockImplementation((bucket: bigint) =>
         Promise.resolve(lps ? (lps[bucket.toString()] ?? 0n) : (values[bucket.toString()] ?? 0n)),
@@ -235,5 +235,18 @@ describe('_wouldLeaveDust', () => {
 
   it('returns true when a partial withdrawal would leave LPs below the dust threshold', () => {
     expect(_wouldLeaveDust(99n, 100n, 100n, 2n)).toBe(true);
+  });
+
+  // Regression (PR19-D05): Ajna redeems LP for a removed quote amount with Math.Rounding.Up,
+  // so a floored prediction can overestimate the LP remainder by one unit and let a move
+  // through that reverts DustyBucket onchain. The prediction must ceil the LP removal.
+  it('ceils the LP removal so a one-unit boundary remainder counts as dust', () => {
+    // floor: 1001*900/1000 = 900 leaves 101 (not dust at threshold 101)
+    // ceil: 901 leaves 100 (dust at threshold 101)
+    expect(_wouldLeaveDust(900n, 1000n, 1001n, 101n)).toBe(true);
+  });
+
+  it('treats a ceiled removal of the full LP balance as leaving no dust', () => {
+    expect(_wouldLeaveDust(1n, 2n, 1n, 10n)).toBe(false);
   });
 });

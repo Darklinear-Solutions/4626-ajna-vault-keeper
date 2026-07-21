@@ -20,7 +20,7 @@ export async function poolBalanceCapAsset(
   initialAmount: bigint,
   vault: VaultLike,
 ): Promise<bigint> {
-  if (process.env.INTEGRATION_TEST) return initialAmount;
+  if (process.env.INTEGRATION_TEST === 'true') return initialAmount;
   const poolBalance = await getPoolBalance(vault);
   return initialAmount > poolBalance ? poolBalance : initialAmount;
 }
@@ -29,7 +29,7 @@ export async function poolBalanceCapWad(
   initialAmount: bigint,
   vault: WadVaultLike,
 ): Promise<bigint> {
-  if (process.env.INTEGRATION_TEST) return initialAmount;
+  if (process.env.INTEGRATION_TEST === 'true') return initialAmount;
   const [poolBalance, assetDecimals] = await Promise.all([
     getPoolBalance(vault),
     vault.getAssetDecimals(),

@@ -27,7 +27,7 @@ import { ChainTimeUnavailableError } from '../utils/chainTime.ts';
 import { log } from '../utils/logger.ts';
 import { handleTransaction, getGasWithBuffer } from '../utils/transaction.ts';
 import { selectBuckets, type BucketMove } from '../ark/utils/selectBuckets.ts';
-import { toWad, toWadTokenUnit } from '../utils/decimalConversion.ts';
+import { fromWad, toWad, toWadTokenUnit } from '../utils/decimalConversion.ts';
 import { type Address } from 'viem';
 
 type RuntimeVault = ReturnType<typeof createVault>;
@@ -57,12 +57,7 @@ export async function metavaultRun() {
     const arkAllocations = await _buildArkAllocations();
     const bufferAllocation = await _buildBufferAllocation();
 
-    _rebalanceBuffer(
-      arkAllocations,
-      bufferAllocation,
-      totalAssets,
-      BigInt(config.arkGlobal.minMoveAmount),
-    );
+    _rebalanceBuffer(arkAllocations, bufferAllocation, totalAssets);
 
     const arks = _toArks(arkAllocations);
     const evaluations = evaluateRates(arks);
@@ -129,11 +124,12 @@ async function _buildArkAllocations(): Promise<ArkAllocation<RuntimeVault>[]> {
   for (const arkConfig of config.arks) {
     const vault = createVault(arkConfig.address);
     const settings = resolveArkSettings(arkConfig);
-    const [balance, supplyCap, rate, badDebt] = await Promise.all([
+    const [balance, supplyCap, rate, badDebt, assetDecimals] = await Promise.all([
       getExpectedSupplyAssets(arkConfig.address) as Promise<bigint>,
       getSupplyCap(arkConfig.address),
       vault.getBorrowFeeRate() as Promise<bigint>,
       poolHasBadDebt(vault, settings.maxAuctionAge),
+      vault.getAssetDecimals() as Promise<number>,
     ]);
     const cappedBalance = await poolBalanceCapAsset(balance, vault);
 
@@ -147,7 +143,7 @@ async function _buildArkAllocations(): Promise<ArkAllocation<RuntimeVault>[]> {
       min: arkConfig.allocation.min,
       max: arkConfig.allocation.max,
       rate,
-      minMoveAmount: settings.minMoveAmount,
+      minMoveAmount: fromWad(settings.minMoveAmount, assetDecimals),
       hasBadDebt: badDebt,
     });
   }

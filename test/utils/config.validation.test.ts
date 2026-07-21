@@ -145,6 +145,22 @@ describe('config: keeper section', () => {
     );
   });
 
+  // Regression (PR19-D26): Node timers and AbortSignal.timeout clamp values above 2^31-1 to
+  // ~1ms, so an oversized intervalMs silently turns the configured cadence into a hot loop.
+  // The request-timeout fields are all validated <= intervalMs, so this bound covers them too.
+  it('rejects intervalMs above the 32-bit signed timer maximum', async () => {
+    mockConfigFs(makeConfig({ keeper: { intervalMs: 2147483648, haltIfLupBelowHtp: true } }));
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow(
+      'config.json: keeper.intervalMs must be <= 2147483647',
+    );
+  });
+
+  it('accepts intervalMs at the 32-bit signed timer maximum', async () => {
+    mockConfigFs(makeConfig({ keeper: { intervalMs: 2147483647, haltIfLupBelowHtp: true } }));
+    const { config } = await import('../../src/utils/config.ts');
+    expect(config.keeper.intervalMs).toBe(2147483647);
+  });
+
   it('rejects non-boolean haltIfLupBelowHtp', async () => {
     mockConfigFs(makeConfig({ keeper: { intervalMs: 1, haltIfLupBelowHtp: 'yes' } }));
     await expect(import('../../src/utils/config.ts')).rejects.toThrow(

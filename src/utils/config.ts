@@ -186,7 +186,7 @@ export const config = {
 
 function validateKeeper(c: RawConfig): void {
   requireObject(c.keeper, 'keeper');
-  requireSafeInteger(c.keeper.intervalMs, 'keeper.intervalMs', { min: 1 });
+  requireSafeInteger(c.keeper.intervalMs, 'keeper.intervalMs', { min: 1, max: 2147483647 });
   requireBoolean(c.keeper.haltIfLupBelowHtp, 'keeper.haltIfLupBelowHtp');
 
   if (c.keeper.logLevel !== undefined) {
