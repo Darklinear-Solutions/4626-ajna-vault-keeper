@@ -27,8 +27,8 @@ const headers: Record<string, string> = {
   ...(tier === 'pro' && key && { 'x-cg-pro-api-key': key }),
 };
 
-export async function getOffchainPrice(): Promise<bigint> {
-  const collateralAddress = config.collateralTokenAddress;
+export async function getOffchainPrice(collateralTokenAddress?: string): Promise<bigint> {
+  const collateralAddress = collateralTokenAddress ?? config.collateralTokenAddress;
   if (!collateralAddress) throw new Error('collateralTokenAddress is not configured');
 
   const res = await fetch(_priceUrl(), {

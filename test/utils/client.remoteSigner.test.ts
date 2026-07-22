@@ -50,7 +50,6 @@ function setClientTestEnv(overrides: Record<string, string | undefined>): void {
   restoreEnv(ORIGINAL_ENV);
 
   process.env.RPC_URL = 'https://rpc.example';
-  process.env.SUBGRAPH_URL = 'https://subgraph.example';
   process.env.TEST_ENV = 'false';
 
   delete process.env.PRIVATE_KEY;

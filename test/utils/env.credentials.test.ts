@@ -24,7 +24,6 @@ function restoreEnv(snapshot: NodeJS.ProcessEnv): void {
 function setCredentialTestEnv(overrides: Record<string, string | undefined>): void {
   restoreEnv(ORIGINAL_ENV);
   process.env.RPC_URL = 'https://rpc.example';
-  process.env.SUBGRAPH_URL = 'https://subgraph.example';
 
   delete process.env.PRIVATE_KEY;
   delete process.env.KEYSTORE_PATH;

@@ -10,6 +10,7 @@ function makeVault(
   prices: Record<string, bigint>,
   lps?: Record<string, bigint>,
   dustThreshold: bigint = 1_000_001n,
+  opts: { quoteDeposits?: Record<string, bigint>; lockedIndex?: bigint } = {},
 ): Vault {
   return {
     getBuckets: vi.fn().mockResolvedValue(buckets),
@@ -24,6 +25,16 @@ function makeVault(
       .mockImplementation((bucket: bigint) =>
         Promise.resolve(lps ? (lps[bucket.toString()] ?? 0n) : (values[bucket.toString()] ?? 0n)),
       ),
+    getBucketQuoteDeposit: vi
+      .fn()
+      .mockImplementation((bucket: bigint) =>
+        Promise.resolve(
+          opts.quoteDeposits
+            ? (opts.quoteDeposits[bucket.toString()] ?? 0n)
+            : (values[bucket.toString()] ?? 0n),
+        ),
+      ),
+    getAuctionDebtLockedIndex: vi.fn().mockResolvedValue(opts.lockedIndex ?? null),
     getDustThreshold: vi.fn().mockResolvedValue(dustThreshold),
   } as unknown as Vault;
 }
@@ -125,6 +136,54 @@ describe('selectBuckets', () => {
 
     const result = await selectBuckets(vault, 200n * S);
     expect(result).toEqual([{ bucket: 100n, amount: 200n * S }]);
+  });
+
+  // Regression (PR19-D07): the Vault's lpToValue prices quote plus collateral, but moveToBuffer
+  // can only remove quote. A bucket holding collateral must be planned at its quote deposit,
+  // not its full claim value.
+  it('caps each bucket at its quote deposit when the claim value includes collateral', async () => {
+    const vault = makeVault(
+      [100n, 200n],
+      { '100': 500n * S, '200': 300n * S },
+      { '100': 1000n, '200': 900n },
+      undefined,
+      1_000_001n,
+      { quoteDeposits: { '100': 50n * S, '200': 300n * S } },
+    );
+
+    const result = await selectBuckets(vault, 200n * S);
+    expect(result).toEqual([{ bucket: 200n, amount: 200n * S }]);
+  });
+
+  // Regression (PR19-D07): Ajna reverts RemoveDepositLockedByAuctionDebt for buckets at or
+  // below the auction-debt boundary index, so those buckets must not be selected as sources
+  // while an unlocked alternative can serve the withdrawal.
+  it('skips buckets locked by auction debt', async () => {
+    const vault = makeVault(
+      [100n, 200n],
+      { '100': 500n * S, '200': 300n * S },
+      { '100': 1000n, '200': 900n },
+      undefined,
+      1_000_001n,
+      { lockedIndex: 100n },
+    );
+
+    const result = await selectBuckets(vault, 200n * S);
+    expect(result).toEqual([{ bucket: 200n, amount: 200n * S }]);
+  });
+
+  it('treats a lock boundary at index zero as locking only bucket zero', async () => {
+    const vault = makeVault(
+      [0n, 200n],
+      { '0': 500n * S, '200': 300n * S },
+      { '0': 1000n, '200': 900n },
+      undefined,
+      1_000_001n,
+      { lockedIndex: 0n },
+    );
+
+    const result = await selectBuckets(vault, 200n * S);
+    expect(result).toEqual([{ bucket: 200n, amount: 200n * S }]);
   });
 
   describe('dust prevention', () => {

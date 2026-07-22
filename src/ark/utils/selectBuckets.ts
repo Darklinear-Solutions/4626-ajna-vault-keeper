@@ -11,17 +11,28 @@ export async function selectBuckets(
 ): Promise<BucketMove[]> {
   const buckets = await vault.getBuckets();
   const dustThreshold = await vault.getDustThreshold();
+  const lockedIndex = await vault.getAuctionDebtLockedIndex();
 
   const bucketData = await Promise.all(
-    (buckets as bigint[]).map(async (bucket: bigint) => ({
-      bucket,
-      value: await vault.lpToValue(bucket),
-      lps: await vault.getVaultBucketLps(bucket),
-      price: await vault.getIndexToPrice(bucket),
-    })),
+    (buckets as bigint[]).map(async (bucket: bigint) => {
+      const [claimValue, quoteDeposit, lps, price] = await Promise.all([
+        vault.lpToValue(bucket),
+        vault.getBucketQuoteDeposit(bucket),
+        vault.getVaultBucketLps(bucket),
+        vault.getIndexToPrice(bucket),
+      ]);
+      return {
+        bucket,
+        value: claimValue < quoteDeposit ? claimValue : quoteDeposit,
+        lps,
+        price,
+      };
+    }),
   );
 
-  const nonEmpty = bucketData.filter((b) => b.value > 0n);
+  const nonEmpty = bucketData.filter(
+    (b) => b.value > 0n && (lockedIndex === null || b.bucket > lockedIndex),
+  );
   const sufficient = nonEmpty.filter((b) => b.value >= amount);
 
   if (sufficient.length === 1) {

@@ -11,6 +11,7 @@ const A7 = '0x0000000000000000000000000000000000000007';
 type ConfigOverrides = {
   chainId?: unknown;
   quoteTokenAddress?: unknown;
+  collateralTokenAddress?: unknown;
   metavaultAddress?: unknown;
   keeper?: unknown;
   oracle?: unknown;
@@ -914,5 +915,96 @@ describe('config: invalid JSON and root type', () => {
     await expect(import('../../src/utils/config.ts')).rejects.toThrow(
       'config.json: root must be an object',
     );
+  });
+});
+
+// Regression (PR19-D03): one global oracle pair could price every ARK, so two same-quote pools
+// with different collateral would share a single price feed. Collateral pricing is now
+// resolvable per ARK, with the global values as fallback.
+describe('config: per-ark oracle settings', () => {
+  const arkA = { vaultAddress: A4, vaultAuthAddress: A5, allocation: { min: 0, max: 100 } };
+  const arkB = { vaultAddress: A6, vaultAuthAddress: A7, allocation: { min: 0, max: 100 } };
+
+  it('resolves per-ark collateral and feed overrides with global fallback', async () => {
+    mockConfigFs(
+      makeConfig({
+        collateralTokenAddress: A1,
+        arks: [{ ...arkA, collateralTokenAddress: A6, onchainCollateralAddress: A7 }, arkB],
+      }),
+    );
+    const { config, resolveArkSettings } = await import('../../src/utils/config.ts');
+
+    const overridden = resolveArkSettings(config.arks[0]!).oracle!;
+    expect(overridden.collateralTokenAddress).toBe(A6);
+    expect(overridden.onchainCollateralAddress).toBe(A7);
+    expect(overridden.fixedPrice).toBeNull();
+
+    const fallback = resolveArkSettings(config.arks[1]!).oracle!;
+    expect(fallback.collateralTokenAddress).toBe(A1);
+    expect(fallback.onchainCollateralAddress).toBe(A2);
+  });
+
+  it('resolves a per-ark fixedPrice override', async () => {
+    mockConfigFs(makeConfig({ arks: [{ ...arkA, fixedPrice: '2.50' }, arkB] }));
+    const { config, resolveArkSettings } = await import('../../src/utils/config.ts');
+
+    expect(resolveArkSettings(config.arks[0]!).oracle!.fixedPrice).toBe('2.50');
+    expect(resolveArkSettings(config.arks[1]!).oracle!.fixedPrice).toBeNull();
+  });
+
+  it('rejects a malformed per-ark collateralTokenAddress', async () => {
+    mockConfigFs(makeConfig({ arks: [{ ...arkA, collateralTokenAddress: 'weth' }] }));
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow(
+      'config.json: arks[0].collateralTokenAddress must be a valid 0x-prefixed 20-byte address',
+    );
+  });
+
+  it('rejects a non-string per-ark fixedPrice', async () => {
+    mockConfigFs(makeConfig({ arks: [{ ...arkA, fixedPrice: 2.5 }] }));
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow(
+      'config.json: arks[0].fixedPrice must be a string decimal',
+    );
+  });
+
+  it('requires a collateral feed for every ark when onchainPrimary is true', async () => {
+    mockConfigFs(
+      makeConfig({
+        oracle: {
+          onchainPrimary: true,
+          onchainQuoteAddress: A2,
+          fixedPrice: null,
+        },
+        arks: [{ ...arkA, onchainCollateralAddress: A7 }, arkB],
+      }),
+    );
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow(
+      'config.json: arks[1].onchainCollateralAddress is required when oracle.onchainPrimary is true',
+    );
+  });
+
+  it('requires a collateral token for every ark when oracle.apiUrl is set', async () => {
+    mockConfigFs(
+      makeConfig({
+        oracle: {
+          onchainPrimary: false,
+          apiUrl: 'https://oracle.example/prices',
+          fixedPrice: null,
+        },
+        arks: [{ ...arkA, collateralTokenAddress: A6 }, arkB],
+      }),
+    );
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow(
+      'config.json: arks[1].collateralTokenAddress is required when oracle.apiUrl is set',
+    );
+  });
+
+  it('requires the quote feed when only a per-ark collateral feed is set', async () => {
+    mockConfigFs(
+      makeConfig({
+        oracle: { onchainPrimary: false, fixedPrice: '1.00' },
+        arks: [{ ...arkA, onchainCollateralAddress: A7 }],
+      }),
+    );
+    await expect(import('../../src/utils/config.ts')).rejects.toThrow('must be set together');
   });
 });

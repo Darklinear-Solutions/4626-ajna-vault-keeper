@@ -3,15 +3,6 @@ import { credentialMode, env } from './env.ts';
 import { startupNoticeLog } from './logger.ts';
 
 export function logStartupWarnings(): void {
-  if (!config.keeper.exitOnSubgraphFailure) {
-    startupNoticeLog.warn(
-      {
-        event: 'subgraph_fail_open_enabled',
-      },
-      'subgraph failure handling is fail-open: query failures will be treated as no auctions',
-    );
-  }
-
   if (
     config.oracle.onchainCollateralAddress &&
     config.oracle.onchainQuoteAddress &&
@@ -52,6 +43,34 @@ export function logStartupWarnings(): void {
       },
       'fixed-price mode is enabled: live oracle queries and validation are bypassed',
     );
+  }
+
+  for (const [i, ark] of config.arks.entries()) {
+    const arkCollateralToken = ark.collateralTokenAddress?.toLowerCase();
+    if (arkCollateralToken && arkCollateralToken === config.quoteTokenAddress.toLowerCase()) {
+      startupNoticeLog.warn(
+        { event: 'oracle_denomination_degenerate', source: 'offchain', ark: ark.vaultAddress },
+        `arks[${i}].collateralTokenAddress equals quoteTokenAddress: the offchain oracle will price this ark's pair as a constant 1.0`,
+      );
+    }
+
+    const arkCollateralFeed = ark.onchainCollateralAddress?.toLowerCase();
+    if (
+      arkCollateralFeed &&
+      arkCollateralFeed === config.oracle.onchainQuoteAddress?.toLowerCase()
+    ) {
+      startupNoticeLog.warn(
+        { event: 'oracle_denomination_degenerate', source: 'onchain', ark: ark.vaultAddress },
+        `arks[${i}].onchainCollateralAddress equals oracle.onchainQuoteAddress: the onchain oracle will price this ark's pair as a constant 1.0`,
+      );
+    }
+
+    if (ark.fixedPrice != null && config.oracle.fixedPrice == null) {
+      startupNoticeLog.warn(
+        { event: 'oracle_fixed_price_enabled', rawPrice: ark.fixedPrice, ark: ark.vaultAddress },
+        `fixed-price mode is enabled for arks[${i}]: live oracle queries and validation are bypassed for this ark`,
+      );
+    }
   }
 
   if (

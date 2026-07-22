@@ -45,6 +45,7 @@ function buildVault(address: Address) {
     getAssetDecimals: vi.fn().mockResolvedValue(18),
     getMinBucketIndex: vi.fn().mockResolvedValue(0n),
     getBucketLps: vi.fn().mockResolvedValue(0n),
+    getTotalAuctionsInPool: vi.fn().mockResolvedValue(0n),
     getDustThreshold: vi.fn().mockResolvedValue(0n),
     getBankruptcyTime: vi.fn().mockResolvedValue(BANKRUPTCY_TIMESTAMP),
     isBucketDebtLocked: vi.fn().mockResolvedValue(false),
@@ -75,9 +76,8 @@ async function setupArkRun(opts: SetupOptions) {
   const handleTransaction = vi.fn().mockResolvedValue({ status: true, assets: 0n });
 
   vi.doMock('../../src/ark/vault.ts', () => ({ createVault: vi.fn(() => vault) }));
-  vi.doMock('../../src/subgraph/poolHealth.ts', () => ({
+  vi.doMock('../../src/ajna/poolHealth.ts', () => ({
     poolHasBadDebt: vi.fn().mockResolvedValue(false),
-    SubgraphUnavailableError: class extends Error {},
   }));
   vi.doMock('../../src/utils/transaction.ts', () => ({
     getGasWithBuffer: vi.fn().mockResolvedValue(1n),
@@ -108,7 +108,7 @@ afterEach(() => {
   vi.resetModules();
   vi.useRealTimers();
   vi.doUnmock('../../src/ark/vault.ts');
-  vi.doUnmock('../../src/subgraph/poolHealth.ts');
+  vi.doUnmock('../../src/ajna/poolHealth.ts');
   vi.doUnmock('../../src/utils/transaction.ts');
   vi.doUnmock('../../src/oracle/price.ts');
   vi.doUnmock('../../src/ajna/utils/poolBalanceCap.ts');

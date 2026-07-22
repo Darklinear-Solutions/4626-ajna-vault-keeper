@@ -89,8 +89,15 @@ async function loadStartupChecks(opts: {
   bufferRatioByAuth?: Record<string, bigint>;
   taxByAuth?: Record<string, bigint>;
   tollByAuth?: Record<string, bigint>;
+  poolCollateralByVault?: Record<string, string>;
+  authByVault?: Record<string, string>;
 }) {
   const cfg = { ...configWithMetavault(), ...opts.configOverrides };
+  const cfgArks = cfg.arks as Array<{ vaultAddress: string; vaultAuthAddress: string }>;
+  const authByVault = {
+    ...Object.fromEntries(cfgArks.map((a) => [a.vaultAddress.toLowerCase(), a.vaultAuthAddress])),
+    ...opts.authByVault,
+  };
 
   const metavault: MetavaultStub = {
     asset: () => QUOTE_TOKEN,
@@ -101,7 +108,16 @@ async function loadStartupChecks(opts: {
     ...opts.metavault,
   };
 
-  vi.doMock('../../src/utils/config.ts', () => ({ config: cfg }));
+  vi.doMock('../../src/utils/config.ts', () => ({
+    config: cfg,
+    resolveArkSettings: (ark: { collateralTokenAddress?: string }) => ({
+      oracle: {
+        collateralTokenAddress: ark.collateralTokenAddress,
+        onchainCollateralAddress: undefined,
+        fixedPrice: null,
+      },
+    }),
+  }));
   vi.doMock('../../src/utils/client.ts', () => ({
     client: { account: { address: KEEPER_ADDRESS } },
     readOnlyClient: { getChainId: async () => opts.chainId ?? 1 },
@@ -115,6 +131,20 @@ async function loadStartupChecks(opts: {
     }),
   }));
   vi.doMock('../../src/utils/logger.ts', () => ({ log: { info: vi.fn(), warn: vi.fn() } }));
+  vi.doMock('../../src/ark/vault.ts', () => ({
+    createVault: (address: string) => ({
+      getAuthAddress: async () => {
+        const auth = authByVault[address.toLowerCase()];
+        if (!auth) throw new Error(`mock: missing vault AUTH for ${address}`);
+        return auth;
+      },
+      getCollateralAddress: async () => {
+        const collateral = opts.poolCollateralByVault?.[address.toLowerCase()];
+        if (!collateral) throw new Error(`mock: missing pool collateral for ${address}`);
+        return collateral;
+      },
+    }),
+  }));
 
   const { runStartupChecks } = await import('../../src/utils/startupChecks.ts');
   return runStartupChecks;
@@ -130,6 +160,7 @@ afterEach(() => {
   vi.doUnmock('../../src/utils/client.ts');
   vi.doUnmock('../../src/utils/contract.ts');
   vi.doUnmock('../../src/utils/logger.ts');
+  vi.doUnmock('../../src/ark/vault.ts');
 });
 
 describe('runStartupChecks: chain id', () => {
@@ -280,5 +311,79 @@ describe('runStartupChecks: managed ark fees', () => {
       tollByAuth: { [VAULT_AUTH_1]: 0n },
     });
     await expect(run()).resolves.toBeUndefined();
+  });
+});
+
+// Regression (PR19-D03): nothing verified that a configured collateral token actually matches
+// the ARK pool's collateral, so a mispointed oracle configuration could price a pool with
+// another market's feed. Startup now binds each ARK's resolved collateral to its pool.
+describe('runStartupChecks: ark collateral binding', () => {
+  const COLLATERAL = '0x0000000000000000000000000000000000001111';
+  const OTHER_COLLATERAL = '0x0000000000000000000000000000000000002222';
+
+  it('passes when the configured collateral matches the pool collateral', async () => {
+    const runStartupChecks = await loadStartupChecks({
+      configOverrides: {
+        arks: [
+          {
+            address: ARK_1,
+            vaultAddress: ARK_1,
+            vaultAuthAddress: VAULT_AUTH_1,
+            collateralTokenAddress: COLLATERAL,
+          },
+        ],
+      },
+      poolCollateralByVault: { [ARK_1.toLowerCase()]: COLLATERAL },
+    });
+
+    await expect(runStartupChecks()).resolves.toBeUndefined();
+  });
+
+  it('throws when the configured collateral does not match the pool collateral', async () => {
+    const runStartupChecks = await loadStartupChecks({
+      configOverrides: {
+        arks: [
+          {
+            address: ARK_1,
+            vaultAddress: ARK_1,
+            vaultAuthAddress: VAULT_AUTH_1,
+            collateralTokenAddress: COLLATERAL,
+          },
+        ],
+      },
+      poolCollateralByVault: { [ARK_1.toLowerCase()]: OTHER_COLLATERAL },
+    });
+
+    await expect(runStartupChecks()).rejects.toThrow(
+      'does not match its configured collateralTokenAddress',
+    );
+  });
+
+  it('skips the binding check for arks without a resolvable collateral token', async () => {
+    const runStartupChecks = await loadStartupChecks({});
+
+    await expect(runStartupChecks()).resolves.toBeUndefined();
+  });
+});
+
+// The configured vaultAuthAddress is where the keeper reads bufferRatio/tax/toll policy from,
+// but the Vault enforces its own immutable AUTH. If the two diverge, startup validates the
+// zero-fee invariants against the wrong contract while the real AUTH's fees silently apply to
+// every reallocate. Startup must bind the configured address to the vault's actual AUTH.
+describe('runStartupChecks: ark auth binding', () => {
+  it('throws when the configured vaultAuthAddress does not match the vault AUTH', async () => {
+    const runStartupChecks = await loadStartupChecks({
+      authByVault: { [ARK_1.toLowerCase()]: '0x0000000000000000000000000000000000009999' },
+    });
+
+    await expect(runStartupChecks()).rejects.toThrow(
+      'does not match its configured vaultAuthAddress',
+    );
+  });
+
+  it('passes when the configured vaultAuthAddress matches the vault AUTH', async () => {
+    const runStartupChecks = await loadStartupChecks({});
+
+    await expect(runStartupChecks()).resolves.toBeUndefined();
   });
 });

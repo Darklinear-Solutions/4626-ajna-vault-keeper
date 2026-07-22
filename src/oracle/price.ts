@@ -1,19 +1,18 @@
 import { log } from '../utils/logger.ts';
-import { config } from '../utils/config.ts';
+import { config, type ResolvedArkOracle } from '../utils/config.ts';
 import { toAsset } from '../utils/decimalConversion.ts';
 import { getOffchainPrice } from './offchain.ts';
 import { getOnchainPrice } from './onchain.ts';
 import { AJNA_MAX_PRICE, AJNA_MIN_PRICE, AJNA_PRICE_DECIMALS } from '../ajna/constants.ts';
 
-type PriceSource = () => Promise<bigint>;
+export async function getPrice(oracle?: ResolvedArkOracle): Promise<bigint> {
+  const fixedPrice = oracle ? oracle.fixedPrice : config.oracle.fixedPrice;
+  if (fixedPrice != null) return getFixedPrice(fixedPrice);
 
-const SOURCES: Record<'onchain' | 'offchain', PriceSource> = {
-  onchain: getOnchainPrice,
-  offchain: getOffchainPrice,
-};
-
-export async function getPrice(): Promise<bigint> {
-  if (config.oracle.fixedPrice != null) return getFixedPrice(config.oracle.fixedPrice);
+  const sources: Record<'onchain' | 'offchain', () => Promise<bigint>> = {
+    onchain: () => getOnchainPrice(oracle?.onchainCollateralAddress),
+    offchain: () => getOffchainPrice(oracle?.collateralTokenAddress),
+  };
 
   const errors: Error[] = [];
   const order: ('onchain' | 'offchain')[] = config.oracle.onchainPrimary
@@ -22,7 +21,7 @@ export async function getPrice(): Promise<bigint> {
 
   for (const tag of order) {
     try {
-      const price = await SOURCES[tag]();
+      const price = await sources[tag]();
       validateLivePrice(price, tag);
       return price;
     } catch (err) {

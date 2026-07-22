@@ -3,14 +3,11 @@
   "quoteTokenAddress": "0x6b175474e89094c44da98b954eedeac495271d0f",
   "collateralTokenAddress": "0x6b175474e89094c44da98b954eedeac495271d0f",
   "metavaultAddress": "",
-
   "keeper": {
     "intervalMs": 43200000,
     "logLevel": "warn",
-    "exitOnSubgraphFailure": true,
     "haltIfLupBelowHtp": true
   },
-
   "oracle": {
     "apiUrl": "https://api.coingecko.com/api/v3/simple/token_price/ethereum?contract_addresses=0x6B175474E89094C44Da98b954EedeAC495271d0F&vs_currencies=usd",
     "onchainPrimary": true,
@@ -20,7 +17,6 @@
     "fixedPrice": null,
     "futureSkewTolerance": 120
   },
-
   "arkGlobal": {
     "optimalBucketDiff": 1,
     "bufferPadding": "100000000000000",
@@ -28,13 +24,11 @@
     "minTimeSinceBankruptcy": 259200,
     "maxAuctionAge": 259200
   },
-
   "transaction": {
     "gasBuffer": 100,
     "defaultGas": 5000000,
     "confirmations": 1
   },
-
   "arks": [
     {
       "address": "",
@@ -64,11 +58,9 @@
       }
     }
   ],
-
   "buffer": {
     "address": "",
     "allocation": 40
   },
-
   "minRateDiff": 10
 }

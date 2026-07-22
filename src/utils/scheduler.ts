@@ -1,4 +1,5 @@
 import { config, resolveArkSettings } from './config.ts';
+import { client } from './client.ts';
 import { log } from './logger.ts';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { metavaultRun } from '../keepers/metavaultKeeper.ts';
@@ -7,6 +8,8 @@ import { arkRun } from '../keepers/arkKeeper.ts';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export async function runKeeperInterval() {
+  if (await _hasPendingTransaction()) return;
+
   if (config.metavaultAddress) {
     try {
       await metavaultRun();
@@ -29,6 +32,23 @@ export async function runKeeperInterval() {
       );
     }
   }
+}
+
+async function _hasPendingTransaction(): Promise<boolean> {
+  const address = client.account.address;
+  const [pending, latest] = await Promise.all([
+    client.getTransactionCount({ address, blockTag: 'pending' }),
+    client.getTransactionCount({ address, blockTag: 'latest' }),
+  ]);
+
+  if (pending > latest) {
+    log.warn(
+      { event: 'pending_transaction_detected', address, pending, latest },
+      'skipping keeper run: a previously submitted transaction is still pending',
+    );
+    return true;
+  }
+  return false;
 }
 
 export function startScheduler() {

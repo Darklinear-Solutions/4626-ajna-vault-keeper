@@ -18,6 +18,9 @@ type ArkConfig = {
   minMoveAmount?: string;
   minTimeSinceBankruptcy?: number;
   maxAuctionAge?: number;
+  collateralTokenAddress?: string;
+  onchainCollateralAddress?: string;
+  fixedPrice?: string;
 };
 
 type RawConfig = {
@@ -29,7 +32,6 @@ type RawConfig = {
   keeper: {
     intervalMs: number;
     logLevel?: string;
-    exitOnSubgraphFailure?: boolean;
     haltIfLupBelowHtp: boolean;
   };
 
@@ -63,10 +65,6 @@ type RawConfig = {
     requestTimeoutMs?: number;
   };
 
-  subgraph?: {
-    requestTimeoutMs?: number;
-  };
-
   arks: ArkConfig[];
   buffer: {
     address: Address;
@@ -81,7 +79,6 @@ export const DEFAULT_ONCHAIN_MAX_STALENESS = 86400;
 export const DEFAULT_OFFCHAIN_MAX_STALENESS = 86400;
 export const DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS = 30000;
 export const DEFAULT_ORACLE_REQUEST_TIMEOUT_MS = 10000;
-export const DEFAULT_SUBGRAPH_REQUEST_TIMEOUT_MS = 10000;
 export const DEFAULT_FUTURE_SKEW_TOLERANCE = 120;
 const DEFAULT_BUFFER_PADDING = '100000000000000';
 const DEFAULT_MIN_MOVE_AMOUNT = '1000001';
@@ -122,9 +119,9 @@ validateOracle(raw);
 validateArkGlobal(raw);
 validateTransaction(raw);
 validateRemoteSigner(raw);
-validateSubgraph(raw);
 validateBuffer(raw);
 validateArks(raw);
+validateOraclePerArk(raw);
 validateAllocationSum(raw);
 validateNoDuplicateAddresses(raw);
 
@@ -135,12 +132,19 @@ raw.minRateDiff ??= DEFAULT_MIN_RATE_DIFF;
 
 // ============= Public API =============
 
+export type ResolvedArkOracle = {
+  collateralTokenAddress: Address | undefined;
+  onchainCollateralAddress: Address | undefined;
+  fixedPrice: string | null;
+};
+
 export type ResolvedArkSettings = {
   optimalBucketDiff: bigint;
   bufferPadding: bigint;
   minMoveAmount: bigint;
   minTimeSinceBankruptcy: bigint;
   maxAuctionAge: number;
+  oracle?: ResolvedArkOracle;
 };
 
 export function resolveArkSettings(ark: ArkConfig): ResolvedArkSettings {
@@ -152,6 +156,13 @@ export function resolveArkSettings(ark: ArkConfig): ResolvedArkSettings {
       ark.minTimeSinceBankruptcy ?? raw.arkGlobal.minTimeSinceBankruptcy!,
     ),
     maxAuctionAge: ark.maxAuctionAge ?? raw.arkGlobal.maxAuctionAge!,
+    oracle: {
+      collateralTokenAddress: (ark.collateralTokenAddress ??
+        (raw.collateralTokenAddress || undefined)) as Address | undefined,
+      onchainCollateralAddress: (ark.onchainCollateralAddress ??
+        raw.oracle.onchainCollateralAddress) as Address | undefined,
+      fixedPrice: ark.fixedPrice ?? raw.oracle.fixedPrice,
+    },
   };
 }
 
@@ -172,7 +183,6 @@ export const config = {
   arkGlobal: raw.arkGlobal as Required<RawConfig['arkGlobal']>,
   transaction: raw.transaction as Required<RawConfig['transaction']>,
   remoteSigner: raw.remoteSigner as Required<NonNullable<RawConfig['remoteSigner']>>,
-  subgraph: raw.subgraph as Required<NonNullable<RawConfig['subgraph']>>,
   quoteTokenAddress: quoteTokenAddress.toLowerCase() as Address,
   collateralTokenAddress: (collateralTokenAddress
     ? collateralTokenAddress.toLowerCase()
@@ -197,11 +207,6 @@ function validateKeeper(c: RawConfig): void {
       );
     }
   }
-
-  if (c.keeper.exitOnSubgraphFailure !== undefined) {
-    requireBoolean(c.keeper.exitOnSubgraphFailure, 'keeper.exitOnSubgraphFailure');
-  }
-  c.keeper.exitOnSubgraphFailure ??= true;
 }
 
 function validateOracle(c: RawConfig): void {
@@ -216,9 +221,13 @@ function validateOracle(c: RawConfig): void {
   if (c.oracle.onchainQuoteAddress !== undefined) {
     requireAddress(c.oracle.onchainQuoteAddress, 'oracle.onchainQuoteAddress');
   }
-  if (Boolean(c.oracle.onchainCollateralAddress) !== Boolean(c.oracle.onchainQuoteAddress)) {
+  const anyArkOnchainFeed =
+    Array.isArray(c.arks) &&
+    c.arks.some((ark) => (ark as { onchainCollateralAddress?: unknown })?.onchainCollateralAddress);
+  const anyOnchainCollateralFeed = Boolean(c.oracle.onchainCollateralAddress) || anyArkOnchainFeed;
+  if (anyOnchainCollateralFeed !== Boolean(c.oracle.onchainQuoteAddress)) {
     throwConfigError(
-      'oracle.onchainCollateralAddress and oracle.onchainQuoteAddress must be set together',
+      'oracle.onchainQuoteAddress and an onchain collateral feed (oracle.onchainCollateralAddress or arks[].onchainCollateralAddress) must be set together',
     );
   }
 
@@ -233,22 +242,16 @@ function validateOracle(c: RawConfig): void {
     c.oracle.fixedPrice = null;
   }
 
-  if (c.oracle.apiUrl && !c.collateralTokenAddress) {
-    throwConfigError('collateralTokenAddress is required when oracle.apiUrl is set');
-  }
-
   if (!c.oracle.onchainPrimary && c.oracle.fixedPrice == null && !c.oracle.apiUrl) {
     throwConfigError(
       'oracle.apiUrl is required when onchainPrimary is false and fixedPrice is not set',
     );
   }
 
-  const hasOnchainOracle = Boolean(
-    c.oracle.onchainCollateralAddress && c.oracle.onchainQuoteAddress,
-  );
-  if (c.oracle.onchainPrimary && !hasOnchainOracle) {
+  const hasOnchainOracle = Boolean(anyOnchainCollateralFeed && c.oracle.onchainQuoteAddress);
+  if (c.oracle.onchainPrimary && !c.oracle.onchainQuoteAddress) {
     throwConfigError(
-      'oracle.onchainCollateralAddress and oracle.onchainQuoteAddress are required when onchainPrimary is true',
+      'oracle.onchainQuoteAddress and a collateral feed for every ark are required when onchainPrimary is true',
     );
   }
 
@@ -362,28 +365,6 @@ function validateRemoteSigner(c: RawConfig): void {
   c.remoteSigner.requestTimeoutMs ??= DEFAULT_REMOTE_SIGNER_REQUEST_TIMEOUT_MS;
 }
 
-function validateSubgraph(c: RawConfig): void {
-  if (c.subgraph !== undefined) {
-    requireObject(c.subgraph, 'subgraph');
-
-    if (c.subgraph.requestTimeoutMs !== undefined) {
-      requireSafeInteger(
-        c.subgraph.requestTimeoutMs,
-        'subgraph.requestTimeoutMs',
-        { min: 1 },
-        { detail: 'must be a positive integer' },
-      );
-      if (c.subgraph.requestTimeoutMs > c.keeper.intervalMs) {
-        throwConfigError(
-          `subgraph.requestTimeoutMs (${c.subgraph.requestTimeoutMs}) must not exceed keeper.intervalMs (${c.keeper.intervalMs})`,
-        );
-      }
-    }
-  }
-  c.subgraph ??= {};
-  c.subgraph.requestTimeoutMs ??= DEFAULT_SUBGRAPH_REQUEST_TIMEOUT_MS;
-}
-
 function validateBuffer(c: RawConfig): void {
   requireObject(c.buffer, 'buffer');
 
@@ -449,6 +430,20 @@ function validateArks(c: RawConfig): void {
     if (ark.minMoveAmount !== undefined) {
       requireNonNegativeBigIntString(ark.minMoveAmount, `${at}.minMoveAmount`);
     }
+    if (ark.collateralTokenAddress !== undefined) {
+      requireAddress(ark.collateralTokenAddress, `${at}.collateralTokenAddress`);
+    }
+    if (ark.onchainCollateralAddress !== undefined) {
+      requireAddress(ark.onchainCollateralAddress, `${at}.onchainCollateralAddress`);
+    }
+    if (ark.fixedPrice !== undefined) {
+      if (typeof ark.fixedPrice !== 'string') {
+        throwConfigError(`${at}.fixedPrice must be a string decimal to avoid precision loss`);
+      }
+      if (toAsset(ark.fixedPrice, 18) <= 0n) {
+        throwConfigError(`${at}.fixedPrice must be a positive decimal value`);
+      }
+    }
   }
 
   if (c.arkGlobal.optimalBucketDiff === undefined) {
@@ -458,6 +453,25 @@ function validateArks(c: RawConfig): void {
     if (missing.length > 0) {
       throwConfigError(
         `optimalBucketDiff must be set globally in arkGlobal or individually for every ark (missing on arks: ${missing.join(', ')})`,
+      );
+    }
+  }
+}
+
+function validateOraclePerArk(c: RawConfig): void {
+  for (const [i, ark] of c.arks.entries()) {
+    const at = `arks[${i}]`;
+    if (c.oracle.apiUrl && !(ark.collateralTokenAddress ?? c.collateralTokenAddress)) {
+      throwConfigError(
+        `${at}.collateralTokenAddress is required when oracle.apiUrl is set and no global collateralTokenAddress is configured`,
+      );
+    }
+    if (
+      c.oracle.onchainPrimary &&
+      !(ark.onchainCollateralAddress ?? c.oracle.onchainCollateralAddress)
+    ) {
+      throwConfigError(
+        `${at}.onchainCollateralAddress is required when oracle.onchainPrimary is true and no global oracle.onchainCollateralAddress is configured`,
       );
     }
   }

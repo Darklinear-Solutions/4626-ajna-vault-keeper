@@ -31,6 +31,12 @@ function makeVault(entries: BucketFixture[], dustThreshold: bigint): Vault {
       .mockImplementation((bucket: bigint) =>
         Promise.resolve(byBucket.get(bucket.toString())?.lps ?? 0n),
       ),
+    getBucketQuoteDeposit: vi
+      .fn()
+      .mockImplementation((bucket: bigint) =>
+        Promise.resolve(byBucket.get(bucket.toString())?.value ?? 0n),
+      ),
+    getAuctionDebtLockedIndex: vi.fn().mockResolvedValue(null),
     getDustThreshold: vi.fn().mockResolvedValue(dustThreshold),
   } as unknown as Vault;
 }

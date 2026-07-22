@@ -17,10 +17,10 @@ export const contracts = {
 
 export type ContractAddressKey = keyof typeof contracts;
 
-export async function getAddress(name: ContractAddressKey): Promise<Address> {
-  const entry = contracts[name];
-  const idx = process.env.USE_MOCKS === 'true' ? 1 : 0;
-  const addr = (entry as StaticTuple)[idx];
+export async function getAddress(name: ContractAddressKey, override?: Address): Promise<Address> {
+  const entry = contracts[name] as StaticTuple;
+  const useMocks = process.env.USE_MOCKS === 'true';
+  const addr = useMocks ? entry[1] : (override ?? entry[0]);
   if (!addr) throw new Error(`Missing ${name} address`);
   return addr as Address;
 }

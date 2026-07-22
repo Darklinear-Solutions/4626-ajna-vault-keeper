@@ -4,10 +4,11 @@ import type { Address } from 'viem';
 const POOL = '0x00000000000000000000000000000000000000c3' as Address;
 const QUOTE = '0x00000000000000000000000000000000000000d4' as Address;
 
-function buildVault() {
+function buildVault(escrowedQuoteWad = 0n) {
   return {
     getPoolAddress: vi.fn().mockResolvedValue(POOL),
     getAssetDecimals: vi.fn().mockResolvedValue(6),
+    getPoolEscrowedQuote: vi.fn().mockResolvedValue(escrowedQuoteWad),
   };
 }
 
@@ -85,6 +86,36 @@ describe('poolBalanceCap integration test gate', () => {
 
     await expect(poolBalanceCapAsset(500n * 10n ** 6n, buildVault())).resolves.toBe(
       100n * 10n ** 6n,
+    );
+  });
+});
+
+describe('poolBalanceCap escrowed quote subtraction', () => {
+  // Regression (PR19-D07): the raw pool token balance includes auction bond escrow and
+  // unclaimed reserves that Ajna subtracts from the quote available for removal, so the cap
+  // must subtract the escrowed amounts before comparing.
+  it('subtracts bond escrow and unclaimed reserves from the available balance', async () => {
+    const readContract = vi.fn().mockResolvedValue(100n * 10n ** 6n);
+    const { poolBalanceCapAsset, poolBalanceCapWad } = await importWithIntegrationTest(
+      undefined,
+      readContract,
+    );
+    const escrowed = 30n * 10n ** 18n;
+
+    await expect(poolBalanceCapAsset(500n * 10n ** 6n, buildVault(escrowed))).resolves.toBe(
+      70n * 10n ** 6n,
+    );
+    await expect(poolBalanceCapWad(500n * 10n ** 18n, buildVault(escrowed))).resolves.toBe(
+      70n * 10n ** 18n,
+    );
+  });
+
+  it('floors the available balance at zero when escrow exceeds the pool balance', async () => {
+    const readContract = vi.fn().mockResolvedValue(10n * 10n ** 6n);
+    const { poolBalanceCapWad } = await importWithIntegrationTest(undefined, readContract);
+
+    await expect(poolBalanceCapWad(500n * 10n ** 18n, buildVault(30n * 10n ** 18n))).resolves.toBe(
+      0n,
     );
   });
 });

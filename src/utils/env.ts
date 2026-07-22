@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 
-const REQUIRED = ['RPC_URL', 'SUBGRAPH_URL'] as const;
+const REQUIRED = ['RPC_URL'] as const;
 
 function readOptionalEnv(key: string): string | undefined {
   const value = process.env[key]?.trim();
@@ -116,7 +116,6 @@ export const env = {
   REMOTE_SIGNER_TLS_CLIENT_KEY,
   REMOTE_SIGNER_TLS_CLIENT_KEY_PASSWORD,
   REMOTE_SIGNER_TLS_CA,
-  SUBGRAPH_URL: process.env.SUBGRAPH_URL!,
   ORACLE_API_KEY: process.env.ORACLE_API_KEY,
   ORACLE_API_TIER: process.env.ORACLE_API_TIER,
 };
