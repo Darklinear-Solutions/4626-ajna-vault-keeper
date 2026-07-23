@@ -13,19 +13,22 @@ afterEach(() => {
 
 type AuctionList = Address[];
 
+const LIVE_KICK_TIME = 1_699_999_990n;
+
 function makeVault(auctionList: AuctionList) {
   return {
     getAddress: () => VAULT_ADDRESS,
     getTotalAuctionsInPool: vi.fn().mockResolvedValue(BigInt(auctionList.length)),
-    getAuctionNext: vi.fn().mockImplementation((borrower: Address) =>
-      Promise.resolve({
+    getAuctionNext: vi.fn().mockImplementation((borrower: Address) => {
+      const idx = auctionList.indexOf(borrower);
+      return Promise.resolve({
         head: auctionList[0] ?? zeroAddress,
-        next:
-          auctionList[auctionList.indexOf(borrower) + 1] === undefined
-            ? zeroAddress
-            : auctionList[auctionList.indexOf(borrower) + 1]!,
-      }),
-    ),
+        next: auctionList[idx + 1] === undefined ? zeroAddress : auctionList[idx + 1]!,
+        // A borrower still in the list is a live auction (nonzero kickTime); a borrower
+        // that has been settled/deleted onchain reads back an all-zero struct (kickTime 0).
+        kickTime: idx === -1 ? 0n : LIVE_KICK_TIME,
+      });
+    }),
     getAuctionStatus: vi.fn(),
   };
 }
@@ -145,6 +148,68 @@ describe('poolHasBadDebt onchain auction enumeration', () => {
     await expect(_getActiveAuctionBorrowers(vault)).rejects.toThrow(
       'kept changing during enumeration',
     );
+  });
+
+  // Regression: a balanced settle+kick can keep the count constant while the walk follows a stale
+  // .next into a just-settled node (which reads back an all-zero struct: next = 0x0, kickTime = 0).
+  // Length == count and count-unchanged would BOTH pass, silently returning the stale set and
+  // missing the newly kicked auction. Requiring each walked node to be a live auction (kickTime != 0)
+  // detects the deleted node and forces a retry instead of accepting the stale pass.
+  it('fails closed when the walk terminates on a settled node while the count stays balanced', async () => {
+    const { _getActiveAuctionBorrowers } = await loadPoolHealth();
+    const vault = {
+      getAddress: () => VAULT_ADDRESS,
+      getTotalAuctionsInPool: vi.fn().mockResolvedValue(2n),
+      getAuctionStatus: vi.fn(),
+      getAuctionNext: vi.fn().mockImplementation((borrower: Address) => {
+        if (borrower === BORROWER_A) {
+          return Promise.resolve({ head: BORROWER_A, next: BORROWER_B, kickTime: LIVE_KICK_TIME });
+        }
+        // BORROWER_B was settled mid-walk: its struct is deleted, so next and kickTime read 0.
+        if (borrower === BORROWER_B) {
+          return Promise.resolve({ head: BORROWER_A, next: zeroAddress, kickTime: 0n });
+        }
+        return Promise.resolve({ head: BORROWER_A, next: BORROWER_A, kickTime: 0n });
+      }),
+    };
+
+    await expect(_getActiveAuctionBorrowers(vault)).rejects.toThrow(
+      'kept changing during enumeration',
+    );
+  });
+
+  it('retries past a settled node and returns the live list once the walk is consistent', async () => {
+    const BORROWER_M = '0x0000000000000000000000000000000000000005' as Address;
+    const { _getActiveAuctionBorrowers } = await loadPoolHealth();
+    let walkCount = 0;
+    const vault = {
+      getAddress: () => VAULT_ADDRESS,
+      getTotalAuctionsInPool: vi.fn().mockResolvedValue(2n),
+      getAuctionStatus: vi.fn(),
+      getAuctionNext: vi.fn().mockImplementation((borrower: Address) => {
+        // A fresh head read begins each walk; the first walk hits the stale node, the second is clean.
+        if (borrower === zeroAddress) {
+          walkCount++;
+          return Promise.resolve({ head: BORROWER_A, next: BORROWER_A, kickTime: 0n });
+        }
+        if (borrower === BORROWER_A) {
+          return Promise.resolve(
+            walkCount === 1
+              ? { head: BORROWER_A, next: BORROWER_B, kickTime: LIVE_KICK_TIME }
+              : { head: BORROWER_A, next: BORROWER_M, kickTime: LIVE_KICK_TIME },
+          );
+        }
+        if (borrower === BORROWER_B) {
+          return Promise.resolve({ head: BORROWER_A, next: zeroAddress, kickTime: 0n });
+        }
+        if (borrower === BORROWER_M) {
+          return Promise.resolve({ head: BORROWER_A, next: zeroAddress, kickTime: LIVE_KICK_TIME });
+        }
+        return Promise.resolve({ head: BORROWER_A, next: zeroAddress, kickTime: 0n });
+      }),
+    };
+
+    await expect(_getActiveAuctionBorrowers(vault)).resolves.toEqual([BORROWER_A, BORROWER_M]);
   });
 });
 

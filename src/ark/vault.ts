@@ -111,7 +111,11 @@ export function createVault(address: Address, vaultAuthAddress?: Address) {
     getTotalAuctionsInPool: async () => BigInt(await (await getPool()).read.totalAuctionsInPool()),
     getAuctionNext: async (borrower: Address) => {
       const auctionInfo = await (await getPool()).read.auctionInfo([borrower]);
-      return { head: (auctionInfo as any)[7] as Address, next: (auctionInfo as any)[8] as Address };
+      return {
+        head: (auctionInfo as any)[7] as Address,
+        next: (auctionInfo as any)[8] as Address,
+        kickTime: BigInt((auctionInfo as any)[3]),
+      };
     },
     updateInterest: async (gas: bigint) => (await getPool()).write.updateInterest({ gas }),
     getTotalT0DebtInAuction: async () => (await getPool()).read.totalT0DebtInAuction(),

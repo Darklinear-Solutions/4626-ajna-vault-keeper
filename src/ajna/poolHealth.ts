@@ -5,7 +5,9 @@ import { zeroAddress, type Address } from 'viem';
 type VaultLike = {
   getAddress: () => Address | undefined;
   getTotalAuctionsInPool: () => Promise<bigint>;
-  getAuctionNext: (borrower: Address) => Promise<{ head: Address; next: Address }>;
+  getAuctionNext: (
+    borrower: Address,
+  ) => Promise<{ head: Address; next: Address; kickTime: bigint }>;
   getAuctionStatus: (borrower: Address) => Promise<readonly [bigint, bigint, bigint, ...unknown[]]>;
 };
 
@@ -53,9 +55,11 @@ async function _walkAuctionList(vault: VaultLike, count: bigint): Promise<Addres
   let cursor = (await vault.getAuctionNext(zeroAddress)).head;
 
   while (cursor !== zeroAddress) {
+    const { next, kickTime } = await vault.getAuctionNext(cursor);
+    if (kickTime === 0n) return null;
     borrowers.push(cursor);
     if (BigInt(borrowers.length) > count) return null;
-    cursor = (await vault.getAuctionNext(cursor)).next;
+    cursor = next;
   }
 
   return borrowers;

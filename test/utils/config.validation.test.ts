@@ -1007,4 +1007,50 @@ describe('config: per-ark oracle settings', () => {
     );
     await expect(import('../../src/utils/config.ts')).rejects.toThrow('must be set together');
   });
+
+  // A fixed-price ark never queries the live oracle, so it must not be forced to configure a
+  // collateral token / feed just because another ark (or the global default) uses the live oracle.
+  it('exempts a per-ark fixed-price ark from the onchain collateral feed requirement', async () => {
+    mockConfigFs(
+      makeConfig({
+        oracle: { onchainPrimary: true, onchainQuoteAddress: A2, fixedPrice: null },
+        arks: [
+          { ...arkA, fixedPrice: '1.00' },
+          { ...arkB, onchainCollateralAddress: A7 },
+        ],
+      }),
+    );
+    await expect(import('../../src/utils/config.ts')).resolves.toBeDefined();
+  });
+
+  it('exempts a per-ark fixed-price ark from the offchain collateral token requirement', async () => {
+    mockConfigFs(
+      makeConfig({
+        oracle: {
+          onchainPrimary: false,
+          apiUrl: 'https://oracle.example/prices',
+          fixedPrice: null,
+        },
+        arks: [
+          { ...arkA, fixedPrice: '1.00' },
+          { ...arkB, collateralTokenAddress: A6 },
+        ],
+      }),
+    );
+    await expect(import('../../src/utils/config.ts')).resolves.toBeDefined();
+  });
+
+  it('exempts every ark when a global fixedPrice is set even if oracle.apiUrl is configured', async () => {
+    mockConfigFs(
+      makeConfig({
+        oracle: {
+          onchainPrimary: false,
+          apiUrl: 'https://oracle.example/prices',
+          fixedPrice: '1.00',
+        },
+        arks: [arkA, arkB],
+      }),
+    );
+    await expect(import('../../src/utils/config.ts')).resolves.toBeDefined();
+  });
 });

@@ -461,6 +461,7 @@ function validateArks(c: RawConfig): void {
 function validateOraclePerArk(c: RawConfig): void {
   for (const [i, ark] of c.arks.entries()) {
     const at = `arks[${i}]`;
+    if ((ark.fixedPrice ?? c.oracle.fixedPrice) != null) continue;
     if (c.oracle.apiUrl && !(ark.collateralTokenAddress ?? c.collateralTokenAddress)) {
       throwConfigError(
         `${at}.collateralTokenAddress is required when oracle.apiUrl is set and no global collateralTokenAddress is configured`,

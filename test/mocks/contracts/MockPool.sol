@@ -18,10 +18,14 @@ contract MockPool {
     ) {
         address head = auctionBorrowers.length > 0 ? auctionBorrowers[0] : address(0);
         address next;
-        for (uint256 i = 0; i + 1 < auctionBorrowers.length; i++) {
-            if (auctionBorrowers[i] == _borrower) next = auctionBorrowers[i + 1];
+        uint256 kickTime;
+        for (uint256 i = 0; i < auctionBorrowers.length; i++) {
+            if (auctionBorrowers[i] == _borrower) {
+                kickTime = 1;
+                if (i + 1 < auctionBorrowers.length) next = auctionBorrowers[i + 1];
+            }
         }
-        return (address(0), 0, 0, 0, 0, 0, 0, head, next, address(0));
+        return (address(0), 0, 0, kickTime, 0, 0, 0, head, next, address(0));
     }
 
     function reservesInfo() public pure returns (uint256, uint256, uint256, uint256, uint256) {
