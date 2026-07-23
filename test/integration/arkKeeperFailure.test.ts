@@ -1,11 +1,7 @@
-import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
-
-vi.mock('graphql-request', async () => {
-  const actual = await vi.importActual('graphql-request');
-  return { ...actual, request: vi.fn() };
-});
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 
 import {
+  setAuctionBorrowers,
   setAuctionStatus,
   setBankruptcyTime,
   setLps,
@@ -16,7 +12,6 @@ import { createVault } from '../../src/ark/vault';
 import { arkRun } from '../../src/keepers/arkKeeper';
 import { client } from '../../src/utils/client';
 import { config, resolveArkSettings } from '../../src/utils/config';
-import { request } from 'graphql-request';
 import type { Address } from 'viem';
 
 const testSettings = resolveArkSettings(config.arks[0]!);
@@ -39,9 +34,6 @@ describe('keeper run failure', () => {
     await client.request({ method: 'evm_revert' as any, params: [snapshot] as any });
     snapshot = await client.request({ method: 'evm_snapshot' as any, params: [] as any });
     await setMockState();
-
-    (request as any).mockReset?.();
-    (request as any).mockResolvedValue({ liquidationAuctions: [] });
   });
 
   afterAll(async () => {
@@ -82,10 +74,7 @@ describe('keeper run failure', () => {
     const latestBlock = await client.getBlock({ blockTag: 'latest' });
     const kickTime = latestBlock.timestamp - 259201n;
 
-    (request as any).mockResolvedValueOnce({
-      liquidationAuctions: [{ borrower, kickTime: String(kickTime) }],
-    });
-
+    await setAuctionBorrowers([borrower]);
     await setAuctionStatus(borrower, kickTime, 0n, 1000000000n);
     await arkRun(
       process.env.MOCK_VAULT_ADDRESS as Address,

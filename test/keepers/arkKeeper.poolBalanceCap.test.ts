@@ -37,6 +37,8 @@ function buildVault() {
     getAssetDecimals: vi.fn().mockResolvedValue(6),
     getMinBucketIndex: vi.fn().mockResolvedValue(0n),
     getBucketLps: vi.fn().mockResolvedValue(0n),
+    getTotalAuctionsInPool: vi.fn().mockResolvedValue(0n),
+    getPoolEscrowedQuote: vi.fn().mockResolvedValue(0n),
     getDustThreshold: vi.fn().mockResolvedValue(1n),
     getBankruptcyTime: vi.fn().mockResolvedValue(0n),
     isBucketDebtLocked: vi.fn().mockResolvedValue(false),
@@ -45,12 +47,69 @@ function buildVault() {
   };
 }
 
+function mockArkRunModules(vault: ReturnType<typeof buildVault>, poolBalance: bigint) {
+  const readContract = vi.fn().mockResolvedValue(poolBalance);
+  const handleTransaction = vi.fn(async (_tx: unknown, ctx?: { action?: string }) => {
+    if (ctx?.action === 'move') return { status: true, assets: 100n * WAD };
+    return { status: true, assets: 0n };
+  });
+
+  vi.doMock('../../src/utils/config.ts', () => ({
+    config: { quoteTokenAddress: QUOTE, metavaultAddress: undefined },
+  }));
+  vi.doMock('../../src/utils/client.ts', () => ({ client: { readContract } }));
+  vi.doMock('../../src/ark/vault.ts', () => ({
+    createVault: vi.fn(() => vault),
+  }));
+  vi.doMock('../../src/ajna/poolHealth.ts', () => ({
+    poolHasBadDebt: vi.fn().mockResolvedValue(false),
+  }));
+  vi.doMock('../../src/utils/transaction.ts', () => ({
+    getGasWithBuffer: vi.fn().mockResolvedValue(1n),
+    handleTransaction,
+  }));
+  vi.doMock('../../src/oracle/price.ts', () => ({
+    getPrice: vi.fn().mockResolvedValue(100n),
+  }));
+  vi.doMock('../../src/utils/logger.ts', () => ({
+    log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+  }));
+  vi.doMock('../../src/utils/chainTime.ts', () => ({
+    getChainTime: vi.fn().mockResolvedValue(0n),
+    ChainTimeUnavailableError: class extends Error {},
+  }));
+
+  return { readContract, handleTransaction };
+}
+
+async function runArk() {
+  const previousIntegrationTest = process.env.INTEGRATION_TEST;
+  delete process.env.INTEGRATION_TEST;
+  try {
+    const { arkRun } = await import('../../src/keepers/arkKeeper.ts');
+
+    await arkRun(ARK, ARK, {
+      optimalBucketDiff: 0n,
+      bufferPadding: 0n,
+      minMoveAmount: 1_000_001n,
+      minTimeSinceBankruptcy: 0n,
+      maxAuctionAge: 0,
+    });
+  } finally {
+    if (previousIntegrationTest === undefined) {
+      delete process.env.INTEGRATION_TEST;
+    } else {
+      process.env.INTEGRATION_TEST = previousIntegrationTest;
+    }
+  }
+}
+
 afterEach(() => {
   vi.resetModules();
   vi.doUnmock('../../src/utils/config.ts');
   vi.doUnmock('../../src/utils/client.ts');
   vi.doUnmock('../../src/ark/vault.ts');
-  vi.doUnmock('../../src/subgraph/poolHealth.ts');
+  vi.doUnmock('../../src/ajna/poolHealth.ts');
   vi.doUnmock('../../src/utils/transaction.ts');
   vi.doUnmock('../../src/oracle/price.ts');
   vi.doUnmock('../../src/utils/logger.ts');
@@ -60,57 +119,9 @@ afterEach(() => {
 describe('arkRun pool balance cap units', () => {
   it('scales pool native token balance to WAD before capping ARK bucket moves', async () => {
     const vault = buildVault();
-    const readContract = vi.fn().mockResolvedValue(1_000n * SIX_DECIMAL_TOKEN);
-    const handleTransaction = vi.fn(async (_tx: unknown, ctx?: { action?: string }) => {
-      if (ctx?.action === 'move') return { status: true, assets: 100n * WAD };
-      return { status: true, assets: 0n };
-    });
+    const { readContract } = mockArkRunModules(vault, 1_000n * SIX_DECIMAL_TOKEN);
 
-    vi.doMock('../../src/utils/config.ts', () => ({
-      config: { quoteTokenAddress: QUOTE, metavaultAddress: undefined },
-    }));
-    vi.doMock('../../src/utils/client.ts', () => ({ client: { readContract } }));
-    vi.doMock('../../src/ark/vault.ts', () => ({
-      createVault: vi.fn(() => vault),
-    }));
-    vi.doMock('../../src/subgraph/poolHealth.ts', () => ({
-      poolHasBadDebt: vi.fn().mockResolvedValue(false),
-      SubgraphUnavailableError: class extends Error {},
-    }));
-    vi.doMock('../../src/utils/transaction.ts', () => ({
-      getGasWithBuffer: vi.fn().mockResolvedValue(1n),
-      handleTransaction,
-    }));
-    vi.doMock('../../src/oracle/price.ts', () => ({
-      getPrice: vi.fn().mockResolvedValue(100n),
-    }));
-    vi.doMock('../../src/utils/logger.ts', () => ({
-      log: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
-    }));
-    vi.doMock('../../src/utils/chainTime.ts', () => ({
-      getChainTime: vi.fn().mockResolvedValue(0n),
-      ChainTimeUnavailableError: class extends Error {},
-    }));
-
-    const previousIntegrationTest = process.env.INTEGRATION_TEST;
-    delete process.env.INTEGRATION_TEST;
-    try {
-      const { arkRun } = await import('../../src/keepers/arkKeeper.ts');
-
-      await arkRun(ARK, ARK, {
-        optimalBucketDiff: 0n,
-        bufferPadding: 0n,
-        minMoveAmount: 1_000_001n,
-        minTimeSinceBankruptcy: 0n,
-        maxAuctionAge: 0,
-      });
-    } finally {
-      if (previousIntegrationTest === undefined) {
-        delete process.env.INTEGRATION_TEST;
-      } else {
-        process.env.INTEGRATION_TEST = previousIntegrationTest;
-      }
-    }
+    await runArk();
 
     expect(readContract).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -121,5 +132,19 @@ describe('arkRun pool balance cap units', () => {
     );
     expect(vault.move).toHaveBeenCalledWith(5n, 10n, 100n * WAD, 1n);
     expect(vault.move).toHaveBeenCalledWith(6n, 10n, 100n * WAD, 1n);
+  });
+
+  // Regression (PR19-D07): Ajna moveQuoteToken relocates deposit accounting without moving
+  // ERC-20 cash, so the pool balance cap must only limit Buffer withdrawals. A fully utilized
+  // pool with zero cash must still consolidate out-of-range buckets internally.
+  it('still consolidates buckets internally when the pool has no spare cash', async () => {
+    const vault = buildVault();
+    mockArkRunModules(vault, 0n);
+
+    await runArk();
+
+    expect(vault.move).toHaveBeenCalledWith(5n, 10n, 100n * WAD, 1n);
+    expect(vault.move).toHaveBeenCalledWith(6n, 10n, 100n * WAD, 1n);
+    expect(vault.moveToBuffer).not.toHaveBeenCalled();
   });
 });

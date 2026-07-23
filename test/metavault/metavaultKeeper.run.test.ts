@@ -8,13 +8,6 @@ const ARK_B = '0x00000000000000000000000000000000000000b2' as Address;
 const S = 1_000_000n;
 const TX_HASH = '0x1111111111111111111111111111111111111111111111111111111111111111' as const;
 
-class SubgraphUnavailableErrorStub extends Error {
-  constructor(cause?: unknown) {
-    super('subgraph query failed in fail-closed mode', { cause });
-    this.name = 'SubgraphUnavailableError';
-  }
-}
-
 type ArkConfig = {
   address: Address;
   allocation: { min: number; max: number };
@@ -45,7 +38,7 @@ function resetMetavaultKeeperModules() {
   vi.doUnmock('../../src/keepers/arkKeeper.ts');
   vi.doUnmock('../../src/metavault/metavault.ts');
   vi.doUnmock('../../src/metavault/utils/evaluateRates.ts');
-  vi.doUnmock('../../src/subgraph/poolHealth.ts');
+  vi.doUnmock('../../src/ajna/poolHealth.ts');
   vi.doUnmock('../../src/ark/utils/selectBuckets.ts');
   vi.doUnmock('../../src/utils/transaction.ts');
   vi.doUnmock('../../src/ajna/utils/poolBalanceCap.ts');
@@ -79,6 +72,7 @@ async function setupMetavaultRunTest({
   accrued = {},
   poolHasBadDebt = vi.fn().mockResolvedValue(false),
   haltedArks = [],
+  minMoveAmount = '1000001',
 }: {
   arkConfigs?: ArkConfig[];
   balances?: Partial<Record<Address, bigint>>;
@@ -91,6 +85,7 @@ async function setupMetavaultRunTest({
   accrued?: Partial<Record<Address, bigint>>;
   poolHasBadDebt?: (vault: { getAddress: () => Address }) => Promise<boolean>;
   haltedArks?: Address[];
+  minMoveAmount?: string;
 } = {}) {
   const vaultFixtures = {
     [ARK_A]: buildVaultFixture(ARK_A, { rate: 100n }),
@@ -117,7 +112,10 @@ async function setupMetavaultRunTest({
   const reallocate = vi.fn().mockReturnValue({ kind: 'reallocate' });
   const evaluateRates = vi.fn().mockReturnValue(evaluations);
   const selectBuckets = vi.fn().mockResolvedValue(bucketPlan);
-  const handleTransaction = vi.fn().mockResolvedValue({ status: true });
+  const handleTransaction = vi.fn(async (_tx: unknown, ctx?: Record<string, unknown>) => ({
+    status: true,
+    assets: (ctx?.amount as bigint) ?? 0n,
+  }));
   const getGasWithBuffer = vi.fn().mockResolvedValue(77n);
   const poolBalanceCapAsset = vi.fn(
     async (amount: bigint, vault: { getAddress: () => Address }) => {
@@ -133,14 +131,14 @@ async function setupMetavaultRunTest({
   vi.doMock('../../src/utils/config.ts', () => ({
     config: {
       minRateDiff: 10,
-      keeper: { logLevel: 'warn', haltIfLupBelowHtp: true, exitOnSubgraphFailure: false },
+      keeper: { logLevel: 'warn', haltIfLupBelowHtp: true },
       oracle: {
         onchainPrimary: false,
         onchainMaxStaleness: null,
         fixedPrice: null,
         futureSkewTolerance: 120,
       },
-      arkGlobal: { optimalBucketDiff: 1, maxAuctionAge: 259200, minMoveAmount: '1000001' },
+      arkGlobal: { optimalBucketDiff: 1, maxAuctionAge: 259200, minMoveAmount },
       transaction: { confirmations: 1 },
       defaultGas: 3_000_000n,
       gasBuffer: 50n,
@@ -151,7 +149,7 @@ async function setupMetavaultRunTest({
     resolveArkSettings: () => ({
       optimalBucketDiff: 1n,
       bufferPadding: 0n,
-      minMoveAmount: 1_000_001n,
+      minMoveAmount: BigInt(minMoveAmount),
       minTimeSinceBankruptcy: 0n,
       maxAuctionAge: 0,
     }),
@@ -177,9 +175,8 @@ async function setupMetavaultRunTest({
   vi.doMock('../../src/metavault/utils/evaluateRates.ts', () => ({
     evaluateRates,
   }));
-  vi.doMock('../../src/subgraph/poolHealth.ts', () => ({
+  vi.doMock('../../src/ajna/poolHealth.ts', () => ({
     poolHasBadDebt,
-    SubgraphUnavailableError: SubgraphUnavailableErrorStub,
   }));
   vi.doMock('../../src/ark/utils/selectBuckets.ts', () => ({
     selectBuckets,
@@ -352,6 +349,38 @@ describe('metavaultRun orchestration', () => {
     expect(handleTransaction).toHaveBeenCalledTimes(3);
   });
 
+  // Regression (PR19-D07): Ajna removeQuoteToken removes up to the requested amount, so a
+  // confirmed moveToBuffer can deliver less than planned (escrowed cash, collateral in the
+  // bucket, or another lender shrinking the position). The run must reconcile the decoded
+  // receipt amounts and abort before reallocate when the buffer is underprepared.
+  it('aborts before reallocate when moveToBuffer receipts cover less than the planned decrease', async () => {
+    const { metavaultRun, handleTransaction, reallocate, log } = await setupMetavaultRunTest({
+      balances: {
+        [BUFFER]: 400n * S,
+        [ARK_A]: 300n * S,
+        [ARK_B]: 300n * S,
+      },
+      evaluations: [],
+      bucketPlan: [{ bucket: 4150n, amount: 100n * S }],
+    });
+
+    handleTransaction.mockImplementation(async (_tx: unknown, ctx?: Record<string, unknown>) => {
+      if (ctx?.action === 'moveToBuffer') return { status: true, assets: 60n * S };
+      return { status: true, assets: (ctx?.amount as bigint) ?? 0n };
+    });
+
+    await metavaultRun();
+
+    expect(reallocate).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'metavault_run_aborted',
+        reason: expect.stringContaining('moveToBuffer receipts for ark'),
+      }),
+      expect.stringContaining('cover'),
+    );
+  });
+
   it('uses live supply caps to limit target increases during a buffer drain', async () => {
     const { metavaultRun, getSupplyCap, reallocate, selectBuckets, handleTransaction, log } =
       await setupMetavaultRunTest({
@@ -442,9 +471,9 @@ describe('metavaultRun orchestration', () => {
       evaluations: [],
     });
 
-    handleTransaction.mockImplementation(async (_tx: unknown, ctx?: { action?: string }) => {
-      if (ctx?.action === 'drain') return { status: false };
-      return { status: true };
+    handleTransaction.mockImplementation(async (_tx: unknown, ctx?: Record<string, unknown>) => {
+      if (ctx?.action === 'drain') return { status: false, assets: 0n };
+      return { status: true, assets: (ctx?.amount as bigint) ?? 0n };
     });
 
     await metavaultRun();
@@ -588,6 +617,45 @@ describe('metavaultRun orchestration', () => {
     );
   });
 
+  // Regression (PR19-D04): arkGlobal.minMoveAmount is documented and configured in WAD, but the
+  // planner compares it against Euler balances denominated in native asset decimals. For a
+  // 6-decimal asset, a 1-token threshold (1e18 WAD) was previously interpreted as 1e12 tokens,
+  // suppressing the buffer fill entirely and aborting the run on buffer-below-target validation.
+  it('converts a WAD minMoveAmount to asset decimals so valid 6-decimal moves are not suppressed', async () => {
+    const SIX_DEC = 10n ** 6n;
+    const WAD = 10n ** 18n;
+    const arkA = buildVaultFixture(ARK_A, { rate: 100n, assetDecimals: 6 });
+    const arkB = buildVaultFixture(ARK_B, { rate: 200n, assetDecimals: 6 });
+
+    const { metavaultRun, selectBuckets, reallocate, log } = await setupMetavaultRunTest({
+      minMoveAmount: WAD.toString(),
+      balances: {
+        [BUFFER]: 350n * SIX_DEC,
+        [ARK_A]: 200n * SIX_DEC,
+        [ARK_B]: 450n * SIX_DEC,
+      },
+      totalAssets: 1000n * SIX_DEC,
+      bucketPlan: [{ bucket: 4150n, amount: 50n * WAD }],
+      evaluations: [],
+      vaults: { [ARK_A]: arkA, [ARK_B]: arkB },
+    });
+
+    await metavaultRun();
+
+    // The 50-token buffer deficit is sourced from the lowest-rate ark (ARK_A). The converted
+    // threshold is 1 token (1e6), so the 50e6 deduction must not be gated.
+    expect(selectBuckets).toHaveBeenCalledWith(arkA, 50n * WAD);
+    expect(reallocate).toHaveBeenCalledOnce();
+    expect(reallocate).toHaveBeenCalledWith(
+      [
+        { id: ARK_A, assets: 150n * SIX_DEC + accrualPad(200n * SIX_DEC, 50n * SIX_DEC) },
+        { id: BUFFER, assets: maxUint256 },
+      ],
+      3_000_000n,
+    );
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
   it('does not count sub-token-unit WAD bucket legs as metavault pre-move coverage', async () => {
     const SIX_DEC = 10n ** 6n;
     const WAD = 10n ** 18n;
@@ -725,17 +793,18 @@ describe('metavaultRun orchestration', () => {
     expect(callsPer(ARK_B)).toBe(1);
   });
 
-  // Regression (DIFFERENTIAL_REVIEW_REPORT #11): in fail-closed mode a subgraph outage must
-  // halt the entire metavault run, not silently degrade to "all arks have bad debt". The
-  // previous behavior conflated subgraph failure with confirmed bad debt: inbound allocation
-  // to those arks was blocked, but the keeper still pre-moved and submitted reallocate(),
-  // operating on stale risk data while the bad-debt oracle was unavailable.
+  // Regression (DIFFERENTIAL_REVIEW_REPORT #11): a failed bad-debt read must halt the entire
+  // metavault run, not silently degrade to "all arks have bad debt". The previous behavior
+  // conflated a failed read with confirmed bad debt: inbound allocation to those arks was
+  // blocked, but the keeper still pre-moved and submitted reallocate(), operating on stale
+  // risk data while the bad-debt check was unavailable.
   it('aborts the run without pre-moves or reallocate when poolHasBadDebt fails closed', async () => {
+    const badDebtReadFailure = new Error('auction enumeration failed');
     const poolHasBadDebt = vi.fn(async () => {
-      throw new SubgraphUnavailableErrorStub();
+      throw badDebtReadFailure;
     });
 
-    const { metavaultRun, vaults, selectBuckets, handleTransaction, reallocate, log } =
+    const { metavaultRun, vaults, selectBuckets, handleTransaction, reallocate } =
       await setupMetavaultRunTest({
         balances: {
           [BUFFER]: 400n * S,
@@ -747,7 +816,7 @@ describe('metavaultRun orchestration', () => {
         poolHasBadDebt,
       });
 
-    await metavaultRun();
+    await expect(metavaultRun()).rejects.toThrow(badDebtReadFailure);
 
     expect(poolHasBadDebt).toHaveBeenCalled();
     expect(selectBuckets).not.toHaveBeenCalled();
@@ -757,21 +826,14 @@ describe('metavaultRun orchestration', () => {
     expect(vaults[ARK_B]!.moveToBuffer).not.toHaveBeenCalled();
     expect(handleTransaction).not.toHaveBeenCalled();
     expect(reallocate).not.toHaveBeenCalled();
-    expect(log.error).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: 'metavault_run_aborted',
-        reason: 'subgraph unavailable',
-      }),
-      expect.stringContaining('subgraph unavailable'),
-    );
   });
 
-  // Regression: a confirmed per-ark bad-debt flag (subgraph healthy, auction status indicates
-  // bad debt for one ark) must NOT short-circuit the whole run — the keeper continues planning
-  // and can still allocate around the affected ark. This pairs with the abort-on-subgraph-
-  // failure test above to lock in the distinction between "ark has bad debt" and "we cannot
-  // determine bad debt because the subgraph is down."
-  it('does not raise a subgraph-unavailable abort when poolHasBadDebt returns true for a single ark', async () => {
+  // Regression: a confirmed per-ark bad-debt flag (the bad-debt read succeeds and reports bad
+  // debt for one ark) must NOT short-circuit the whole run — the keeper continues planning
+  // and can still allocate around the affected ark. This pairs with the abort-on-failed-read
+  // test above to lock in the distinction between "ark has bad debt" and "we cannot determine
+  // bad debt because the read failed."
+  it('does not abort the run when poolHasBadDebt returns true for a single ark', async () => {
     const poolHasBadDebt = vi.fn(
       async (vault: { getAddress: () => Address }) => vault.getAddress() === ARK_A,
     );
@@ -786,7 +848,7 @@ describe('metavaultRun orchestration', () => {
 
     expect(poolHasBadDebt).toHaveBeenCalled();
     expect(log.error).not.toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'metavault_run_aborted', reason: 'subgraph unavailable' }),
+      expect.objectContaining({ event: 'metavault_run_aborted' }),
       expect.anything(),
     );
   });

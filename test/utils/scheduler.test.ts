@@ -23,12 +23,14 @@ async function setupScheduler(opts: {
   metavaultRun?: ReturnType<typeof vi.fn>;
   arkRun?: ReturnType<typeof vi.fn>;
   resolveArkSettings?: ReturnType<typeof vi.fn>;
+  getTransactionCount?: ReturnType<typeof vi.fn>;
 }) {
   const log = { error: vi.fn(), info: vi.fn(), warn: vi.fn() };
   const arks = opts.arks ?? [ark(firstArk), ark(secondArk)];
   const metavaultRun = opts.metavaultRun ?? vi.fn().mockResolvedValue(undefined);
   const arkRun = opts.arkRun ?? vi.fn().mockResolvedValue(undefined);
   const resolveArkSettings = opts.resolveArkSettings ?? vi.fn(() => settings);
+  const getTransactionCount = opts.getTransactionCount ?? vi.fn().mockResolvedValue(0);
 
   vi.doMock('../../src/utils/config.ts', () => ({
     config: {
@@ -38,18 +40,25 @@ async function setupScheduler(opts: {
     },
     resolveArkSettings,
   }));
+  vi.doMock('../../src/utils/client.ts', () => ({
+    client: {
+      account: { address: '0x00000000000000000000000000000000000000ee' },
+      getTransactionCount,
+    },
+  }));
   vi.doMock('../../src/utils/logger.ts', () => ({ log }));
   vi.doMock('../../src/keepers/metavaultKeeper.ts', () => ({ metavaultRun }));
   vi.doMock('../../src/keepers/arkKeeper.ts', () => ({ arkRun }));
 
   const { runKeeperInterval } = await import('../../src/utils/scheduler.ts');
 
-  return { runKeeperInterval, log, metavaultRun, arkRun, resolveArkSettings };
+  return { runKeeperInterval, log, metavaultRun, arkRun, resolveArkSettings, getTransactionCount };
 }
 
 afterEach(() => {
   vi.resetModules();
   vi.doUnmock('../../src/utils/config.ts');
+  vi.doUnmock('../../src/utils/client.ts');
   vi.doUnmock('../../src/utils/logger.ts');
   vi.doUnmock('../../src/keepers/metavaultKeeper.ts');
   vi.doUnmock('../../src/keepers/arkKeeper.ts');
@@ -131,5 +140,45 @@ describe('runKeeperInterval', () => {
       expect.objectContaining({ event: 'metavault_run_failed', err: failure }),
       expect.any(String),
     );
+  });
+
+  // Regression (PR19-D10): after a receipt timeout the keeper persists nothing, so a still
+  // pending transaction from a prior interval could be duplicated by the next run's
+  // submissions. The interval must skip entirely while the account has an in-flight nonce.
+  it('skips the whole interval when the account has a pending transaction', async () => {
+    const getTransactionCount = vi.fn(({ blockTag }: { blockTag: string }) =>
+      Promise.resolve(blockTag === 'pending' ? 5 : 4),
+    );
+
+    const { runKeeperInterval, log, metavaultRun, arkRun } = await setupScheduler({
+      arks: [ark(firstArk)],
+      metavaultAddress: firstArk,
+      getTransactionCount,
+    });
+
+    await expect(runKeeperInterval()).resolves.toBeUndefined();
+
+    expect(metavaultRun).not.toHaveBeenCalled();
+    expect(arkRun).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'pending_transaction_detected', pending: 5, latest: 4 }),
+      expect.stringContaining('still pending'),
+    );
+  });
+
+  it('runs normally when pending and latest nonces match', async () => {
+    const { runKeeperInterval, arkRun, getTransactionCount } = await setupScheduler({
+      arks: [ark(firstArk)],
+    });
+
+    await expect(runKeeperInterval()).resolves.toBeUndefined();
+
+    expect(getTransactionCount).toHaveBeenCalledWith(
+      expect.objectContaining({ blockTag: 'pending' }),
+    );
+    expect(getTransactionCount).toHaveBeenCalledWith(
+      expect.objectContaining({ blockTag: 'latest' }),
+    );
+    expect(arkRun).toHaveBeenCalled();
   });
 });

@@ -26,11 +26,17 @@ function makeVault(entries: BucketFixture[], dustThreshold: bigint): Vault {
       .mockImplementation((bucket: bigint) =>
         Promise.resolve(byBucket.get(bucket.toString())?.price ?? 0n),
       ),
-    getBucketLps: vi
+    getVaultBucketLps: vi
       .fn()
       .mockImplementation((bucket: bigint) =>
         Promise.resolve(byBucket.get(bucket.toString())?.lps ?? 0n),
       ),
+    getBucketQuoteDeposit: vi
+      .fn()
+      .mockImplementation((bucket: bigint) =>
+        Promise.resolve(byBucket.get(bucket.toString())?.value ?? 0n),
+      ),
+    getAuctionDebtLockedIndex: vi.fn().mockResolvedValue(null),
     getDustThreshold: vi.fn().mockResolvedValue(dustThreshold),
   } as unknown as Vault;
 }
@@ -78,8 +84,10 @@ describe('selectBuckets property tests', () => {
             selectedTotal += move.amount;
 
             if (move.amount < entry!.value && entry!.value > 0n) {
-              const lpsRemoved = (entry!.lps * move.amount) / entry!.value;
-              const remainingLps = entry!.lps - lpsRemoved;
+              // Mirrors the planner's ceiled LP-removal prediction, matching Ajna's
+              // Math.Rounding.Up when redeeming LP for a removed quote amount.
+              const lpsRemoved = (entry!.lps * move.amount + entry!.value - 1n) / entry!.value;
+              const remainingLps = entry!.lps > lpsRemoved ? entry!.lps - lpsRemoved : 0n;
               expect(remainingLps === 0n || remainingLps >= dustThreshold).toBe(true);
             }
           }

@@ -52,6 +52,7 @@ function buildVaultFixture({
     }),
     getMinBucketIndex: vi.fn().mockResolvedValue(0n),
     getBucketLps: vi.fn().mockResolvedValue(0n),
+    getTotalAuctionsInPool: vi.fn().mockResolvedValue(0n),
     getDustThreshold: vi.fn().mockResolvedValue(1n),
     getBankruptcyTime: vi.fn().mockResolvedValue(0n),
     isBucketDebtLocked: vi.fn().mockResolvedValue(false),
@@ -69,7 +70,7 @@ function resetArkKeeperModules() {
   vi.resetModules();
   vi.doUnmock('../../src/utils/config.ts');
   vi.doUnmock('../../src/ark/vault.ts');
-  vi.doUnmock('../../src/subgraph/poolHealth.ts');
+  vi.doUnmock('../../src/ajna/poolHealth.ts');
   vi.doUnmock('../../src/utils/transaction.ts');
   vi.doUnmock('../../src/oracle/price.ts');
   vi.doUnmock('../../src/ajna/utils/poolBalanceCap.ts');
@@ -95,9 +96,8 @@ describe('ark keeper reserved buffer handling', () => {
     vi.doMock('../../src/ark/vault.ts', () => ({
       createVault: vi.fn(() => vaultFixture),
     }));
-    vi.doMock('../../src/subgraph/poolHealth.ts', () => ({
+    vi.doMock('../../src/ajna/poolHealth.ts', () => ({
       poolHasBadDebt: vi.fn().mockResolvedValue(false),
-      SubgraphUnavailableError: class extends Error {},
     }));
     vi.doMock('../../src/utils/transaction.ts', () => ({
       getGasWithBuffer: vi.fn().mockResolvedValue(1n),

@@ -50,7 +50,6 @@ function setClientTestEnv(overrides: Record<string, string | undefined>): void {
   restoreEnv(ORIGINAL_ENV);
 
   process.env.RPC_URL = 'https://rpc.example';
-  process.env.SUBGRAPH_URL = 'https://subgraph.example';
   process.env.TEST_ENV = 'false';
 
   delete process.env.PRIVATE_KEY;
@@ -188,6 +187,98 @@ describe('remote signer account', () => {
         },
       ],
     });
+  });
+
+  // Regression (PR19-D09): parseTransaction() populates both v and yParity for a signed legacy
+  // transaction, but viem's legacy serializer consumes only v. Preferring yParity during
+  // signature extraction made every legacy signing round-trip throw before broadcast.
+  it('signs legacy transactions using the v signature field', async () => {
+    const signer = privateKeyToAccount(
+      '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+    );
+    const transaction = {
+      chainId: 1,
+      data: '0x1234',
+      gas: 21000n,
+      gasPrice: 20n,
+      nonce: 7,
+      to: '0x00000000000000000000000000000000000000b2',
+      type: 'legacy',
+      value: 0n,
+    } satisfies TransactionSerializable;
+    const signedTransaction = await signer.signTransaction(transaction);
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonRpcMockResponse({
+        id: 1,
+        jsonrpc: '2.0',
+        result: signedTransaction,
+      }),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { createRemoteSignerAccount } = await import('../../src/utils/remoteSigner.ts');
+
+    const account = createRemoteSignerAccount({
+      address: signer.address,
+      timeoutMs: 30000,
+      url: 'https://signer.example',
+    });
+
+    const broadcast = await account.signTransaction(transaction);
+
+    // The re-serialized legacy transaction must be byte-identical to the signer's output and
+    // must recover to the signer, proving the EIP-155 v value survived extraction.
+    expect(broadcast).toBe(signedTransaction);
+    const parsed = parseTransaction(broadcast);
+    expect(parsed.type).toBe('legacy');
+    expect(parsed.v).toBe(parseTransaction(signedTransaction).v);
+    await expect(recoverTransactionAddress({ serializedTransaction: broadcast })).resolves.toBe(
+      signer.address,
+    );
+
+    // Web3Signer's eth_signTransaction has no `type` field; legacy requests must carry gasPrice
+    // and omit type entirely.
+    const request = JSON.parse(fetchMock.mock.calls[0]![1]!.body as string);
+    expect(request.params[0]).not.toHaveProperty('type');
+    expect(request.params[0].gasPrice).toBe('0x14');
+    expect(request.params[0]).not.toHaveProperty('maxFeePerGas');
+  });
+
+  // Regression (PR19-D09): Web3Signer's documented eth_signTransaction API accepts no type or
+  // accessList field, so an EIP-2930 transaction cannot be faithfully signed. It must be
+  // rejected locally instead of relying on a recovery mismatch after a round-trip.
+  it('rejects EIP-2930 transactions before contacting the signer', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { createRemoteSignerAccount } = await import('../../src/utils/remoteSigner.ts');
+
+    const account = createRemoteSignerAccount({
+      address: '0x00000000000000000000000000000000000000A1',
+      timeoutMs: 30000,
+      url: 'https://signer.example',
+    });
+    const transaction = {
+      accessList: [
+        {
+          address: '0x00000000000000000000000000000000000000b2',
+          storageKeys: ['0x0000000000000000000000000000000000000000000000000000000000000001'],
+        },
+      ],
+      chainId: 1,
+      gas: 21000n,
+      gasPrice: 20n,
+      nonce: 7,
+      to: '0x00000000000000000000000000000000000000b2',
+      type: 'eip2930',
+      value: 0n,
+    } satisfies TransactionSerializable;
+
+    await expect(account.signTransaction(transaction)).rejects.toThrow(
+      'Remote signer does not support eip2930 transactions in this keeper',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects transaction signatures that recover to a different address', async () => {

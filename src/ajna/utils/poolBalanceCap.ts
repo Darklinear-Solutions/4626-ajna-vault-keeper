@@ -1,39 +1,45 @@
 import { client } from '../../utils/client.ts';
 import { config } from '../../utils/config.ts';
-import { toWad } from '../../utils/decimalConversion.ts';
+import { fromWad, toWad } from '../../utils/decimalConversion.ts';
 import { erc20Abi, type Address } from 'viem';
 
-type VaultLike = { getPoolAddress: () => Promise<Address> };
-type WadVaultLike = VaultLike & { getAssetDecimals: () => Promise<number> };
+type VaultLike = {
+  getPoolAddress: () => Promise<Address>;
+  getAssetDecimals: () => Promise<number>;
+  getPoolEscrowedQuote: () => Promise<bigint>;
+};
 
-async function getPoolBalance(vault: VaultLike) {
-  const poolAddress = await vault.getPoolAddress();
-  return client.readContract({
+async function getAvailablePoolBalanceWad(vault: VaultLike): Promise<bigint> {
+  const [poolAddress, escrowed, assetDecimals] = await Promise.all([
+    vault.getPoolAddress(),
+    vault.getPoolEscrowedQuote(),
+    vault.getAssetDecimals(),
+  ]);
+  const poolBalance = await client.readContract({
     address: config.quoteTokenAddress as Address,
     abi: erc20Abi,
     functionName: 'balanceOf',
     args: [poolAddress],
   });
+  const poolBalanceWad = toWad(poolBalance as bigint, assetDecimals);
+  return poolBalanceWad > escrowed ? poolBalanceWad - escrowed : 0n;
 }
 
 export async function poolBalanceCapAsset(
   initialAmount: bigint,
   vault: VaultLike,
 ): Promise<bigint> {
-  if (process.env.INTEGRATION_TEST) return initialAmount;
-  const poolBalance = await getPoolBalance(vault);
-  return initialAmount > poolBalance ? poolBalance : initialAmount;
-}
-
-export async function poolBalanceCapWad(
-  initialAmount: bigint,
-  vault: WadVaultLike,
-): Promise<bigint> {
-  if (process.env.INTEGRATION_TEST) return initialAmount;
-  const [poolBalance, assetDecimals] = await Promise.all([
-    getPoolBalance(vault),
+  if (process.env.INTEGRATION_TEST === 'true') return initialAmount;
+  const [availableWad, assetDecimals] = await Promise.all([
+    getAvailablePoolBalanceWad(vault),
     vault.getAssetDecimals(),
   ]);
-  const poolBalanceWad = toWad(poolBalance, assetDecimals);
-  return initialAmount > poolBalanceWad ? poolBalanceWad : initialAmount;
+  const available = fromWad(availableWad, assetDecimals);
+  return initialAmount > available ? available : initialAmount;
+}
+
+export async function poolBalanceCapWad(initialAmount: bigint, vault: VaultLike): Promise<bigint> {
+  if (process.env.INTEGRATION_TEST === 'true') return initialAmount;
+  const available = await getAvailablePoolBalanceWad(vault);
+  return initialAmount > available ? available : initialAmount;
 }

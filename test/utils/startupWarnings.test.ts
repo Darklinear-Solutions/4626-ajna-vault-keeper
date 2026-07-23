@@ -18,7 +18,6 @@ function mockEnv(overrides: { credentialMode?: string; env?: Record<string, unkn
       REMOTE_SIGNER_ADDRESS: undefined,
       REMOTE_SIGNER_ALLOW_INSECURE: false,
       REMOTE_SIGNER_AUTH_TOKEN: undefined,
-      SUBGRAPH_URL: 'https://subgraph.example',
       ORACLE_API_KEY: undefined,
       ORACLE_API_TIER: undefined,
       ...overrides.env,
@@ -27,14 +26,13 @@ function mockEnv(overrides: { credentialMode?: string; env?: Record<string, unkn
 }
 
 describe('logStartupWarnings', () => {
-  it('emits warnings for explicit fail-open, stale-check disabling, and fixed-price mode', async () => {
+  it('emits warnings for stale-check disabling and fixed-price mode', async () => {
     const warn = vi.fn();
 
     vi.doMock('../../src/utils/config.ts', () => ({
       config: {
-        keeper: {
-          exitOnSubgraphFailure: false,
-        },
+        arks: [],
+        keeper: {},
         oracle: {
           onchainCollateralAddress: '0x0000000000000000000000000000000000000002',
           onchainQuoteAddress: '0x0000000000000000000000000000000000000003',
@@ -53,19 +51,14 @@ describe('logStartupWarnings', () => {
 
     logStartupWarnings();
 
-    expect(warn).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ event: 'subgraph_fail_open_enabled' }),
-      expect.stringContaining('fail-open'),
-    );
-    expect(warn).toHaveBeenNthCalledWith(
-      2,
       expect.objectContaining({ event: 'oracle_staleness_check_disabled' }),
       expect.stringContaining('staleness checking is disabled'),
     );
     expect(warn).toHaveBeenNthCalledWith(
-      3,
+      2,
       expect.objectContaining({ event: 'oracle_fixed_price_enabled', rawPrice: '1.00' }),
       expect.stringContaining('fixed-price mode is enabled'),
     );
@@ -76,9 +69,8 @@ describe('logStartupWarnings', () => {
 
     vi.doMock('../../src/utils/config.ts', () => ({
       config: {
-        keeper: {
-          exitOnSubgraphFailure: true,
-        },
+        arks: [],
+        keeper: {},
         oracle: {
           onchainPrimary: true,
           onchainMaxStaleness: 86400,
@@ -103,9 +95,8 @@ describe('logStartupWarnings', () => {
 
     vi.doMock('../../src/utils/config.ts', () => ({
       config: {
-        keeper: {
-          exitOnSubgraphFailure: true,
-        },
+        arks: [],
+        keeper: {},
         oracle: {
           onchainCollateralAddress: '0x0000000000000000000000000000000000000002',
           onchainQuoteAddress: '0x0000000000000000000000000000000000000003',
@@ -140,14 +131,14 @@ describe('logStartupWarnings', () => {
 
     vi.doMock('../../src/utils/config.ts', () => ({
       config: {
+        arks: [],
         keeper: {
-          exitOnSubgraphFailure: false,
           logLevel: 'error',
         },
         oracle: {
           onchainPrimary: true,
           onchainMaxStaleness: 86400,
-          fixedPrice: null,
+          fixedPrice: '1.00',
         },
       },
     }));
@@ -163,8 +154,8 @@ describe('logStartupWarnings', () => {
 
     expect(warn).toHaveBeenCalledOnce();
     expect(warn).toHaveBeenCalledWith(
-      expect.objectContaining({ event: 'subgraph_fail_open_enabled' }),
-      expect.stringContaining('fail-open'),
+      expect.objectContaining({ event: 'oracle_fixed_price_enabled' }),
+      expect.stringContaining('fixed-price mode is enabled'),
     );
   });
 
@@ -173,9 +164,8 @@ describe('logStartupWarnings', () => {
 
     vi.doMock('../../src/utils/config.ts', () => ({
       config: {
-        keeper: {
-          exitOnSubgraphFailure: true,
-        },
+        arks: [],
+        keeper: {},
         oracle: {
           onchainPrimary: true,
           onchainMaxStaleness: 86400,
@@ -211,9 +201,8 @@ describe('logStartupWarnings', () => {
 
     vi.doMock('../../src/utils/config.ts', () => ({
       config: {
-        keeper: {
-          exitOnSubgraphFailure: true,
-        },
+        arks: [],
+        keeper: {},
         oracle: {
           onchainPrimary: true,
           onchainMaxStaleness: 86400,
@@ -250,9 +239,8 @@ describe('logStartupWarnings', () => {
 
     vi.doMock('../../src/utils/config.ts', () => ({
       config: {
-        keeper: {
-          exitOnSubgraphFailure: true,
-        },
+        arks: [],
+        keeper: {},
         quoteTokenAddress: '0x0000000000000000000000000000000000000004',
         collateralTokenAddress: '0x0000000000000000000000000000000000000004',
         oracle: {
@@ -282,5 +270,100 @@ describe('logStartupWarnings', () => {
       expect.objectContaining({ event: 'oracle_denomination_degenerate', source: 'onchain' }),
       expect.stringContaining('constant 1.0'),
     );
+  });
+});
+
+// Regression (PR19-D03 follow-up): the per-ARK oracle overrides must receive the same startup
+// notices as the global values, or a degenerate per-ARK feed pair or per-ARK fixed price would
+// boot without any operator-visible warning.
+describe('logStartupWarnings per-ark oracle overrides', () => {
+  const ARK = '0x00000000000000000000000000000000000000c1';
+
+  function mockConfigWithArk(ark: Record<string, unknown>): void {
+    vi.doMock('../../src/utils/config.ts', () => ({
+      config: {
+        arks: [{ vaultAddress: ARK, ...ark }],
+        quoteTokenAddress: '0x0000000000000000000000000000000000000004',
+        keeper: {},
+        oracle: {
+          onchainQuoteAddress: '0x0000000000000000000000000000000000000005',
+          onchainPrimary: true,
+          onchainMaxStaleness: 86400,
+          fixedPrice: null,
+        },
+      },
+    }));
+  }
+
+  it('warns when a per-ark collateral token equals the quote token', async () => {
+    const warn = vi.fn();
+    mockConfigWithArk({ collateralTokenAddress: '0x0000000000000000000000000000000000000004' });
+    mockEnv();
+    vi.doMock('../../src/utils/logger.ts', () => ({ startupNoticeLog: { warn } }));
+
+    const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
+    logStartupWarnings();
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'oracle_denomination_degenerate',
+        source: 'offchain',
+        ark: ARK,
+      }),
+      expect.stringContaining('constant 1.0'),
+    );
+  });
+
+  it('warns when a per-ark collateral feed equals the quote feed', async () => {
+    const warn = vi.fn();
+    mockConfigWithArk({ onchainCollateralAddress: '0x0000000000000000000000000000000000000005' });
+    mockEnv();
+    vi.doMock('../../src/utils/logger.ts', () => ({ startupNoticeLog: { warn } }));
+
+    const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
+    logStartupWarnings();
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'oracle_denomination_degenerate',
+        source: 'onchain',
+        ark: ARK,
+      }),
+      expect.stringContaining('constant 1.0'),
+    );
+  });
+
+  it('warns when a per-ark fixed price is set while the global fixed price is null', async () => {
+    const warn = vi.fn();
+    mockConfigWithArk({ fixedPrice: '2.50' });
+    mockEnv();
+    vi.doMock('../../src/utils/logger.ts', () => ({ startupNoticeLog: { warn } }));
+
+    const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
+    logStartupWarnings();
+
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'oracle_fixed_price_enabled',
+        rawPrice: '2.50',
+        ark: ARK,
+      }),
+      expect.stringContaining('for this ark'),
+    );
+  });
+
+  it('does not duplicate warnings for arks that only inherit the global values', async () => {
+    const warn = vi.fn();
+    mockConfigWithArk({});
+    mockEnv();
+    vi.doMock('../../src/utils/logger.ts', () => ({ startupNoticeLog: { warn } }));
+
+    const { logStartupWarnings } = await import('../../src/utils/startupWarnings.ts');
+    logStartupWarnings();
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });

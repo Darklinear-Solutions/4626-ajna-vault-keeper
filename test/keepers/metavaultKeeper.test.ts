@@ -18,7 +18,7 @@ import { accrualPad, simulateEulerAccounting } from '../helpers/eulerModel';
 vi.mock('../../src/utils/config', () => ({
   config: {
     minRateDiff: 10,
-    keeper: { logLevel: 'warn', haltIfLupBelowHtp: true, exitOnSubgraphFailure: false },
+    keeper: { logLevel: 'warn', haltIfLupBelowHtp: true },
     oracle: {
       onchainPrimary: false,
       onchainMaxStaleness: null,

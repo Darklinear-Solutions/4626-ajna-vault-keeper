@@ -1,7 +1,8 @@
 import { type Address } from 'viem';
-import { config } from './config.ts';
+import { config, resolveArkSettings } from './config.ts';
 import { contract } from './contract.ts';
 import { client, readOnlyClient } from './client.ts';
+import { createVault } from '../ark/vault.ts';
 import { log } from './logger.ts';
 
 type MetavaultStrategyConfig = {
@@ -13,10 +14,34 @@ type MetavaultStrategyConfig = {
 
 export async function runStartupChecks(): Promise<void> {
   await verifyChainId();
+  await verifyArkBindings();
   if (config.metavaultAddress) {
     await verifyMetavaultDeployment(config.metavaultAddress);
   }
   log.info({ event: 'startup_checks_passed' }, 'startup checks passed');
+}
+
+async function verifyArkBindings(): Promise<void> {
+  for (const [i, ark] of config.arks.entries()) {
+    const vault = createVault(ark.vaultAddress);
+
+    const authAddress = await vault.getAuthAddress();
+    if (authAddress.toLowerCase() !== ark.vaultAuthAddress.toLowerCase()) {
+      throw new Error(
+        `arks[${i}] (${ark.vaultAddress}) vault AUTH (${authAddress}) does not match its configured vaultAuthAddress (${ark.vaultAuthAddress})`,
+      );
+    }
+
+    const collateral = resolveArkSettings(ark).oracle?.collateralTokenAddress;
+    if (!collateral) continue;
+
+    const poolCollateral = await vault.getCollateralAddress();
+    if (poolCollateral.toLowerCase() !== collateral.toLowerCase()) {
+      throw new Error(
+        `arks[${i}] (${ark.vaultAddress}) pool collateral (${poolCollateral}) does not match its configured collateralTokenAddress (${collateral})`,
+      );
+    }
+  }
 }
 
 async function verifyChainId(): Promise<void> {

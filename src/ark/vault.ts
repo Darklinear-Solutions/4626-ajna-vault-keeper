@@ -93,18 +93,45 @@ export function createVault(address: Address, vaultAuthAddress?: Address) {
       const bucketInfo = await (await getPool()).read.bucketInfo([index]);
       return (bucketInfo as any)[0];
     },
+    getVaultBucketLps: async (index: bigint) => {
+      const lenderInfo = await (await getPool()).read.lenderInfo([index, address]);
+      return BigInt((lenderInfo as any)[0]);
+    },
+    getBucketQuoteDeposit: async (index: bigint) => {
+      const bucketInfo = await (await getPool()).read.bucketInfo([index]);
+      return BigInt((bucketInfo as any)[3]);
+    },
+    getAuthAddress: () => vault().read.AUTH() as Promise<Address>,
+    getCollateralAddress: async () =>
+      (await getPool()).read.collateralAddress() as Promise<Address>,
+    getPoolEscrowedQuote: async () => {
+      const reservesInfo = await (await getPool()).read.reservesInfo();
+      return BigInt((reservesInfo as any)[0]) + BigInt((reservesInfo as any)[1]);
+    },
+    getTotalAuctionsInPool: async () => BigInt(await (await getPool()).read.totalAuctionsInPool()),
+    getAuctionNext: async (borrower: Address) => {
+      const auctionInfo = await (await getPool()).read.auctionInfo([borrower]);
+      return {
+        head: (auctionInfo as any)[7] as Address,
+        next: (auctionInfo as any)[8] as Address,
+        kickTime: BigInt((auctionInfo as any)[3]),
+      };
+    },
     updateInterest: async (gas: bigint) => (await getPool()).write.updateInterest({ gas }),
     getTotalT0DebtInAuction: async () => (await getPool()).read.totalT0DebtInAuction(),
     getInflatorInfo: async () => (await getPool()).read.inflatorInfo(),
     getDepositIndex: async (debt: bigint) => (await getPool()).read.depositIndex(debt),
-    isBucketDebtLocked: async (index: bigint): Promise<boolean> => {
+    getAuctionDebtLockedIndex: async (): Promise<bigint | null> => {
       const t0DebtInAuction = (await (await getPool()).read.totalT0DebtInAuction()) as bigint;
-      if (t0DebtInAuction === 0n) return false;
+      if (t0DebtInAuction === 0n) return null;
       const inflatorInfo = await (await getPool()).read.inflatorInfo();
       const wad = 10n ** 18n;
       const debt = (t0DebtInAuction * (inflatorInfo as any)[0] + wad / 2n) / wad;
-      const indexOfSum = (await (await getPool()).read.depositIndex(debt)) as bigint;
-      return index <= indexOfSum;
+      return BigInt(await (await getPool()).read.depositIndex(debt));
+    },
+    isBucketDebtLocked: async function (index: bigint): Promise<boolean> {
+      const lockedIndex = await this.getAuctionDebtLockedIndex();
+      return lockedIndex !== null && index <= lockedIndex;
     },
   };
 }

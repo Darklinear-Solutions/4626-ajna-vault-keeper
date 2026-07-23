@@ -5,7 +5,7 @@ import { toWad, toWadTokenUnit } from '../utils/decimalConversion.ts';
 import { poolBalanceCapWad } from '../ajna/utils/poolBalanceCap.ts';
 import { getGasWithBuffer, handleTransaction, type TransactionData } from '../utils/transaction.ts';
 import { getPrice } from '../oracle/price.ts';
-import { poolHasBadDebt, SubgraphUnavailableError } from '../subgraph/poolHealth.ts';
+import { poolHasBadDebt } from '../ajna/poolHealth.ts';
 import { createVault } from '../ark/vault.ts';
 import { getChainTime, ChainTimeUnavailableError } from '../utils/chainTime.ts';
 import { AJNA_MAX_FENWICK_INDEX } from '../ajna/constants.ts';
@@ -89,13 +89,6 @@ export async function arkRun(
     await logFinalState(data);
   } catch (e) {
     const ark = vault.getAddress();
-    if (e instanceof SubgraphUnavailableError) {
-      log.error(
-        { event: 'ark_run_aborted', ark, reason: 'subgraph unavailable', err: e },
-        `ark run aborted for ark ${ark}: subgraph unavailable`,
-      );
-      return;
-    }
     if (e instanceof ChainTimeUnavailableError) {
       log.error(
         { event: 'ark_run_aborted', ark, reason: 'chain time unavailable', err: e },
@@ -125,10 +118,16 @@ async function rebalanceBuckets(data: KeeperRunData): Promise<void> {
     if (!drainTx.status) abortRun(`drain failed for ark ${vaultAddress}`);
 
     const bucketValue = await vault.lpToValue(bucket);
-    const amountToMove = await poolBalanceCapWad(bucketValue, vault);
-    if (await shouldSkipBucket(bucket, amountToMove, data)) continue;
+    if (await shouldSkipBucket(bucket, bucketValue, data)) continue;
 
-    const operations = planBucketOperations(bucket, amountToMove, bufferNeeded, data);
+    const movableToBuffer = await poolBalanceCapWad(bucketValue, vault);
+    const operations = planBucketOperations(
+      bucket,
+      bucketValue,
+      movableToBuffer,
+      bufferNeeded,
+      data,
+    );
 
     for (const op of operations) {
       const txData = await executeMoveOperation(op, data);
@@ -167,11 +166,13 @@ async function rebalanceBuffer(data: KeeperRunData): Promise<void> {
 function planBucketOperations(
   bucket: bigint,
   amountToMove: bigint,
+  movableToBuffer: bigint,
   bufferNeeded: bigint,
   data: KeeperRunData,
 ): MoveOperation[] {
   const operations: MoveOperation[] = [];
-  const bufferAmount = bufferNeeded < amountToMove ? bufferNeeded : amountToMove;
+  const bufferCapacity = movableToBuffer < amountToMove ? movableToBuffer : amountToMove;
+  const bufferAmount = bufferNeeded < bufferCapacity ? bufferNeeded : bufferCapacity;
 
   if (bufferNeeded <= data.minAmount || bufferAmount < data.assetUnitWad) {
     operations.push({
@@ -380,7 +381,7 @@ export async function _getKeeperData(): Promise<KeeperRunData> {
     vault.getBufferTotal(),
     vault.getLup(),
     vault.getHtp(),
-    getPrice(),
+    getPrice(_settings.oracle),
   ]);
 
   for (let i = 0; i < initialBuckets.length; i++) {

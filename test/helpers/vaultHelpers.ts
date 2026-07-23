@@ -57,6 +57,8 @@ export const setAuctionStatus = async (
   waitForWrite(
     (await getPoolInfoUtils()).write.setAuctionStatus(borrower, kickTime, collateral, debt),
   );
+export const setAuctionBorrowers = async (borrowers: Address[]) =>
+  waitForWrite((await getPool()).write.setAuctionBorrowers([borrowers]));
 const _setLup = async (lup: bigint) => waitForWrite((await getPoolInfoUtils()).write.setLup(lup));
 const _setHtp = async (htp: bigint) => waitForWrite((await getPoolInfoUtils()).write.setHtp(htp));
 

@@ -33,6 +33,7 @@ function buildVault(address: Address) {
     }),
     getMinBucketIndex: vi.fn().mockResolvedValue(0n),
     getBucketLps: vi.fn().mockResolvedValue(0n),
+    getTotalAuctionsInPool: vi.fn().mockResolvedValue(0n),
     getBankruptcyTime: vi.fn().mockResolvedValue(0n),
     isBucketDebtLocked: vi.fn().mockResolvedValue(false),
     getBucketInfo: vi.fn().mockResolvedValue([0n, 0n, 0n]),
@@ -43,7 +44,7 @@ function buildVault(address: Address) {
 afterEach(() => {
   vi.resetModules();
   vi.doUnmock('../../src/ark/vault.ts');
-  vi.doUnmock('../../src/subgraph/poolHealth.ts');
+  vi.doUnmock('../../src/ajna/poolHealth.ts');
   vi.doUnmock('../../src/utils/transaction.ts');
   vi.doUnmock('../../src/oracle/price.ts');
   vi.doUnmock('../../src/ajna/utils/poolBalanceCap.ts');
@@ -62,9 +63,8 @@ describe('ark halt scoping', () => {
     vi.doMock('../../src/ark/vault.ts', () => ({
       createVault: vi.fn((address: Address) => (address === firstArk ? firstVault : secondVault)),
     }));
-    vi.doMock('../../src/subgraph/poolHealth.ts', () => ({
+    vi.doMock('../../src/ajna/poolHealth.ts', () => ({
       poolHasBadDebt: vi.fn().mockResolvedValue(false),
-      SubgraphUnavailableError: class extends Error {},
     }));
     vi.doMock('../../src/utils/transaction.ts', () => ({
       getGasWithBuffer: vi.fn().mockResolvedValue(1n),
@@ -118,9 +118,8 @@ describe('ark halt scoping', () => {
   // the metavault's halt short-circuit cannot silently miss a halt that the ARK keeper fired.
   it('matches halts regardless of address casing', async () => {
     vi.doMock('../../src/ark/vault.ts', () => ({ createVault: vi.fn() }));
-    vi.doMock('../../src/subgraph/poolHealth.ts', () => ({
+    vi.doMock('../../src/ajna/poolHealth.ts', () => ({
       poolHasBadDebt: vi.fn(),
-      SubgraphUnavailableError: class extends Error {},
     }));
     vi.doMock('../../src/utils/transaction.ts', () => ({
       getGasWithBuffer: vi.fn(),

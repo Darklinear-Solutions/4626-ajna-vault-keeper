@@ -62,7 +62,6 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | Variable                         | Description                                                                      | Type                     | Required/Optional                              | Default          |
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
     | `RPC_URL`                        | RPC endpoint used for onchain interactions.                                      | URL (`https://...`)      | Required                                       | None             |
-    | `SUBGRAPH_URL`                   | Subgraph endpoint for pool/vault state queries.                                  | URL (`https://...`)      | Required                                       | None             |
     | `CONFIG_PATH`                    | Optional path to the runtime `config.json` file. Useful when the config is mounted somewhere other than the working directory, such as inside a container. | String (file path)       | Optional                                       | `./config.json`  |
     | `PRIVATE_KEY`                    | Raw private key of the keeper's authorized account. Intended as a headless fallback when the deployer injects it from a secret manager. | Hex string (`0x...`)     | Conditional (exactly one credential mode must be configured) | None             |
     | `KEYSTORE_PATH`                  | Path to an Ethereum V3 keystore file. If set, the keeper prompts for the password on startup. Best suited to local/operator use. | String (file path)       | Conditional (exactly one credential mode must be configured) | None             |
@@ -86,7 +85,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | Local keystore | `KEYSTORE_PATH` | Local/operator mode. Startup is interactive: the keystore password is prompted on boot. |
     | Raw private key | `PRIVATE_KEY` | Headless fallback when the deployer must inject the key directly from a secret manager. |
 
-    Remote signer mode is the strongest supported production posture in this repo. Direct AWS KMS integration is not implemented in the keeper itself, but AWS KMS, Vault, and similar custody systems can back a compatible signer service. The minimum expectation is a reachable Web3Signer-compatible JSON-RPC endpoint that signs for the EOA configured in `REMOTE_SIGNER_ADDRESS`. The signer must have `eth_sign` enabled for the keeper EOA, since the keeper performs an `eth_sign`-based identity verification at startup and will fail to boot if the signer rejects it. The keeper enforces `https` on `REMOTE_SIGNER_URL` by default; plaintext `http` is rejected at startup unless `REMOTE_SIGNER_ALLOW_INSECURE=true` is set as a deliberate escape hatch for local testing. The signer endpoint should stay on a restricted internal network or equivalent access-controlled path, not on the public internet.
+    Remote signer mode is the strongest supported production posture in this repo. Direct AWS KMS integration is not implemented in the keeper itself, but AWS KMS, Vault, and similar custody systems can back a compatible signer service. The minimum expectation is a reachable Web3Signer-compatible JSON-RPC endpoint that signs for the EOA configured in `REMOTE_SIGNER_ADDRESS`. The signer must have `eth_sign` enabled for the keeper EOA, since the keeper performs an `eth_sign`-based identity verification at startup and will fail to boot if the signer rejects it. The keeper enforces `https` on `REMOTE_SIGNER_URL` by default; plaintext `http` is rejected at startup unless `REMOTE_SIGNER_ALLOW_INSECURE=true` is set as a deliberate escape hatch for local testing. The signer endpoint should stay on a restricted internal network or equivalent access-controlled path, not on the public internet. The keeper signs only legacy and EIP-1559 transactions through the remote signer. EIP-2930 transactions and access lists are rejected before any signer request, because Web3Signer's `eth_signTransaction` API cannot represent them.
 
     Two transport-layer auth options are supported and can be combined. `REMOTE_SIGNER_AUTH_TOKEN` adds an `Authorization: Bearer <token>` header to every signer request and is the simplest posture, well suited to deployments where an auth-terminating proxy or the signer itself accepts a static token or API key. mTLS via the `REMOTE_SIGNER_TLS_*` variables is the strongest posture and matches the standard production setup for Web3Signer: the keeper presents a client certificate (`CERT` + `KEY`, optionally encrypted with `KEY_PASSWORD`) and may verify the signer with a private CA bundle (`CA`). All TLS material must be provided as PEM files; if you have a PKCS#12 keystore you can extract PEM with `openssl pkcs12 -in keystore.p12 -out client.pem`. Use the bearer token when the signer or its proxy already terminates auth itself, and prefer mTLS when the signer is reachable directly and supports it. Combining `REMOTE_SIGNER_AUTH_TOKEN` with `REMOTE_SIGNER_ALLOW_INSECURE` sends the token over plaintext http, so that combination should be limited to local testing.
 
@@ -96,15 +95,14 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | -------------------------------- | -------------------------------------------------------------------------------- | ------------------------ | ---------------------------------------------- | ---------------- |
     | `chainId`                        | Chain ID for the intended network.                                               | Integer                  | Optional                                       | 1 (Ethereum mainnet) |
     | `quoteTokenAddress`              | Address of the vault's quote token. The keeper prices the pool as quote tokens per collateral token. | Ethereum address (`0x...`) | Required                                     | None             |
-    | `collateralTokenAddress`         | Address of the vault's collateral token. Used with `quoteTokenAddress` so the offchain oracle can read a USD price for each token and divide collateral USD by quote USD into the quote-per-collateral price. Required for non-stablecoin pools where the two tokens are not both near 1 USD. | Ethereum address (`0x...`) | Conditional (required when `oracle.apiUrl` is set) | None |
+    | `collateralTokenAddress`         | Address of the vault's collateral token. Used with `quoteTokenAddress` so the offchain oracle can read a USD price for each token and divide collateral USD by quote USD into the quote-per-collateral price. Required for non-stablecoin pools where the two tokens are not both near 1 USD. Acts as the global default and can be overridden per ARK for pools with different collateral. | Ethereum address (`0x...`) | Conditional (required globally or per ARK when `oracle.apiUrl` is set) | None |
     | `metavaultAddress`               | Address of the Euler Earn (metavault) contract. If omitted, only the ARK keeper runs. | Ethereum address (`0x...`) | Optional                                   | None             |
-    | `keeper.intervalMs`              | Interval between keeper runs.                                                    | Integer (milliseconds)   | Required                                       | 43,200,000 (12h) |
+    | `keeper.intervalMs`              | Interval between keeper runs. Maximum 2,147,483,647 (~24.8 days), the largest delay Node timers support. | Integer (milliseconds)   | Required                                       | 43,200,000 (12h) |
     | `keeper.logLevel`                | Minimum severity of logs (`info`, `warn`, `error`).                              | String                   | Optional                                       | `info`           |
-    | `keeper.exitOnSubgraphFailure`   | Abort run if the subgraph query fails during the check for bad debt in the pool. The default is fail-closed. Set this to `false` only if you explicitly prefer availability over the bad-debt guard during subgraph outages. | Boolean                  | Optional                                       | `true`           |
     | `keeper.haltIfLupBelowHtp`       | If operations trigger `LUPBelowHTP` error from Ajna, halt keeper until restarted to prevent more tokens from being added to the pool while move targets are likely to require liquidations. | Boolean | Required                      | N/A              |
-    | `oracle.apiUrl`                  | CoinGecko endpoint for the offchain price oracle. The URL must request USD prices for both the collateral and quote tokens (list both in `contract_addresses`) so the keeper can divide them into the quote-per-collateral price. | URL (`https://...`)      | Conditional (if onchain oracle is not primary and no fixed price is set) | None |
+    | `oracle.apiUrl`                  | CoinGecko endpoint for the offchain price oracle. The URL must request USD prices for the quote token and every configured collateral token (list them all in `contract_addresses`) so the keeper can divide them into each ARK's quote-per-collateral price. | URL (`https://...`)      | Conditional (if onchain oracle is not primary and no fixed price is set) | None |
     | `oracle.onchainPrimary`          | Use onchain oracle as primary instead of CoinGecko.                              | Boolean                  | Required                                       | N/A              |
-    | `oracle.onchainCollateralAddress` | Chronicle feed returning the collateral token's USD price. Divided by the quote feed to produce the quote-per-collateral price. Feed decimals cancel in the division, so the two feeds only need to share a decimal convention. | Ethereum address (`0x...`) | Conditional (both onchain feeds required when `onchainPrimary` is true) | None |
+    | `oracle.onchainCollateralAddress` | Chronicle feed returning the collateral token's USD price. Divided by the quote feed to produce the quote-per-collateral price. Feed decimals cancel in the division, so the two feeds only need to share a decimal convention. Acts as the global default and can be overridden per ARK. | Ethereum address (`0x...`) | Conditional (a collateral feed for every ARK and the quote feed are required when `onchainPrimary` is true) | None |
     | `oracle.onchainQuoteAddress`     | Chronicle feed returning the quote token's USD price. Must be set together with `oracle.onchainCollateralAddress`. | Ethereum address (`0x...`) | Conditional (both onchain feeds required when `onchainPrimary` is true) | None |
     | `oracle.onchainMaxStaleness`     | Max allowed age of onchain price data. When omitted, the keeper defaults this to `86400` seconds if an onchain oracle is configured (both `oracle.onchainCollateralAddress` and `oracle.onchainQuoteAddress` are set), otherwise `null`. Set to `null` only to explicitly disable the staleness check. | Integer (seconds) or `null` | Optional                                  | `86400` when the onchain feeds are configured, otherwise `null` |
     | `oracle.offchainMaxStaleness`    | Max allowed age of CoinGecko price data based on the response `last_updated_at` timestamp. | Integer (seconds)        | Optional                                       | `86400`          |
@@ -115,7 +113,6 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | `transaction.defaultGas`         | Default gas limit in the event that gas estimation with the above buffer fails.  | Integer                  | Optional                                       | 5,000,000        |
     | `transaction.confirmations`      | Number of block confirmations to wait for each tx.                               | Integer                  | Required                                       | N/A              |
     | `remoteSigner.requestTimeoutMs`  | Per-request timeout applied to every remote signer JSON-RPC call. Bounded above by `keeper.intervalMs` so a hung signer cannot pin the keeper across runs. Only consulted when remote signer credential mode is in use. | Integer (milliseconds) | Optional                                       | 30,000 (30s)     |
-    | `subgraph.requestTimeoutMs`      | Per-query timeout applied to the subgraph auction lookup, spanning the whole pagination loop rather than each page. Bounded above by `keeper.intervalMs` so a hung subgraph cannot stall the run. A timeout counts as a subgraph failure and follows `keeper.exitOnSubgraphFailure`. | Integer (milliseconds) | Optional | 10,000 (10s) |
     | `arkGlobal.optimalBucketDiff`    | Offset (in bucket indexes) from current pool price to select the optimal bucket. Can also be set per ARK. | Integer | Conditional (required globally or per ARK) | None             |
     | `arkGlobal.bufferPadding`        | Accounts for the slight variation in the value of `totalAssets` (due to interest accruing in Ajna). | String (`WAD`)  | Optional                                       | `"100000000000000"` (1e14) |
     | `arkGlobal.minMoveAmount`        | Skip moves if bucket's quote token balance is below this amount (dust limit) - enforced by vault. | String (`WAD` units)    | Optional                                       | `"1000001"`      |
@@ -131,11 +128,16 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     | `arks[].minMoveAmount`           | Per-ARK override for `arkGlobal.minMoveAmount`.                                  | String (`WAD` units)     | Optional                                       | `arkGlobal` value |
     | `arks[].minTimeSinceBankruptcy`  | Per-ARK override for `arkGlobal.minTimeSinceBankruptcy`.                         | Integer (seconds)        | Optional                                       | `arkGlobal` value |
     | `arks[].maxAuctionAge`           | Per-ARK override for `arkGlobal.maxAuctionAge`.                                  | Integer (seconds)        | Optional                                       | `arkGlobal` value |
+    | `arks[].collateralTokenAddress`  | Per-ARK override for the global `collateralTokenAddress`, for pools whose collateral differs from the global default. Startup verifies it against the pool's actual collateral token. | Ethereum address (`0x...`) | Optional                       | Global value     |
+    | `arks[].onchainCollateralAddress` | Per-ARK override for `oracle.onchainCollateralAddress`, pointing at the Chronicle feed for this ARK's collateral token. | Ethereum address (`0x...`) | Optional                                   | Global value     |
+    | `arks[].fixedPrice`              | Per-ARK override for `oracle.fixedPrice`.                                        | String decimal (e.g. `"1.00"`) | Optional                                 | Global value     |
     | `buffer.address`                 | Address of the buffer strategy registered in the metavault.                      | Ethereum address (`0x...`) | Required                                     | None             |
     | `buffer.allocation`              | Target allocation percentage for the buffer.                                     | Integer (percentage)     | Required                                       | N/A              |
     | `minRateDiff`                    | Minimum percentage difference in borrow fee rates between two ARKs before capital is reallocated from the lower-rate ARK to the higher-rate ARK. | Integer (percentage) | Optional               | 10               |
 
     The sum of all `arks[].allocation.max` values plus `buffer.allocation` must equal 100. Per-ARK settings (`optimalBucketDiff`, `bufferPadding`, `minMoveAmount`, `minTimeSinceBankruptcy`, `maxAuctionAge`) can be set globally in `arkGlobal` or individually per ARK. Per-ARK values take precedence over global values.
+
+    Buffer priority outranks ARK minimum allocations. When the buffer is below its target, the keeper may pull an ARK below its `allocation.min` to refill the buffer, and the ARK stays below its minimum until subsequent inflows are drained back into it.
 
 2. <a name="technical-overview-2-fetching-state"></a>Fetching State:
 
@@ -146,7 +148,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     * `poolBalanceCap(balance, vault)` - caps each ARK's balance to the actual quote token balance in its pool, preventing the keeper from planning moves for tokens that are not currently available.
 
     **ARK keeper:**
-    
+
     * Vault Status and configuration:
       * `vault.paused()` - reads the vault's global pause flag. If true, all keeper actions will immediately exit with no state changes.
       * `vault.bufferRatio()` - returns the configured target share of total assets (in basis points) that should be held in the Buffer. The keeper uses this to calculate whether to top up or drain the Buffer during rebalancing.
@@ -154,7 +156,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
       * (If exposed) `vault.toll()`, `vault.tax()` - return the configured deposit fee and withdrawal fee (in basis points). These are applied directly by the vault on user deposits and withdrawals, not by the keeper.
     * Pool state
       * `getPrice()` -> `getPriceToIndex(price)` - returns the pool's current price. The keeper reads and converts this into the corresponding bucket index and then applies `optimalBucketDiff` to select the target bucket for rebalancing.
-      * `poolHasBadDebt()` - returns true if the pool has unresolved bad debt or active liquidation auctions. If so, the keeper exits immediately without rebalancing to avoid acting in an unhealthy pool state.
+      * `poolHasBadDebt()` - returns true if the pool has unresolved bad debt or active liquidation auctions. The keeper enumerates active auctions directly from the pool's onchain auction list, so no external indexer is involved. If bad debt is found, the keeper exits immediately without rebalancing to avoid acting in an unhealthy pool state.
     * Buffer/Vault
       * `getBufferTotal()`, `getTotalAssets()` - return the Buffer's current balance and the vault's total assets. The keeper compares these values against `bufferRatio()` to decide whether to top up or drain the Buffer during rebalancing.
       * `getAssetDecimals()`, `getBufferRatio()` - return the asset's decimals and the configured buffer ratio. The keeper uses these to compute the Buffer target (`bufferTarget`) for rebalancing decisions.
@@ -176,7 +178,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     * If no allocations need to change - the run exits cleanly with no state changes.
 
     **ARK keeper:**
-    
+
     * If `vault.paused()` is true - the keeper exits immediately with no state changes.
     * If `poolHasBadDebt()` is true - the pool has unresolved bad debt or active liquidations, the keeper exits immediately.
     * If the computed optimal bucket is out of range (its price is below `min(HTP, LUP)` or above `min(currentPrice, priceAt(minBucketIndex))`, the interest-earning band checked by `isBucketInRange`), the keeper exits early with no moves, leaving bucket balances unchanged.
@@ -194,7 +196,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     * When reallocating for rates, the keeper processes ARKs from lowest rate to highest. For each ARK with available funds above its min allocation, it moves capital to higher-rate targets, sorted by rate descending, up to each target's max allocation. ARKs with bad debt are skipped.
 
     **ARK keeper:**
-    
+
     * The keeper reads the current pool price (`getPrice()`), normalizes offchain and fixed-price inputs into Ajna's 18-decimal price domain, converts that price to a bucket index (`getPriceToIndex(price)`), then applies an integer offset `optimalBucketDiff` to produce `optimalBucket`, which `_getKeeperData()` stores for subsequent range checks.
     * Concurrent internal index calculations - `_getKeeperData()` computes `lupIndex`, `htpIndex`, and `optimalBucket` using `Promise.all`, and binds the third value to `optimalBucket`.
     * Buffer target (computed here) & gap (computed later) - `_getKeeperData()` computes `bufferTarget` via `_calculateBufferTarget()`, which multiplies total assets (scaled to WAD using asset decimals) by the configured `bufferRatio` and divides by 10,000 (basis points). It also reads `bufferTotal` with `getBufferTotal()`. The actual deficit/surplus ("gap") is only derived during rebalancing (e.g. `calculateBufferDeficit(data)`), so it is not stored in `_getKeeperData()`.
@@ -211,7 +213,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
     * The `reallocate()` call on the Euler Earn contract atomically redistributes capital across all strategies according to the new allocations.
 
     **ARK keeper:**
-    
+
     * If the Buffer is in deficit and below target, the keeper withdraws from out-of-range buckets into the Buffer until the deficit is closed. For each candidate bucket, if `bucket === optimalBucket` or `lpToValue(bucket) < minMoveAmount` or `isBucketInRange(bucket, data) === true`, it skips. Otherwise it calls `vault.moveToBuffer(from=bucket, amount=min(lpToValue(bucket), remainingDeficit))`.
     * If the Buffer is not in deficit (i.e. at target), the keeper consolidates out-of-range buckets. For each bucket where `!isBucketInRange(...)`, if it is not the `optimalBucket` and `lpToValue(bucket) >= minMoveAmount`, call `vault.move(from=bucket, to=optimalBucket, amount=lpToValue(bucket))`, otherwise skip.
     * After covering deficits or consolidating, the keeper re-checks Buffer vs. target:
@@ -237,7 +239,7 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
           * `tx_success` - successful tx with hash, block, action (`move`, `moveToBuffer`, `moveFromBuffer`, `drain`, `reallocate`), amount, and from/to buckets.
       * Warnings:
           * `ark_run_halted` - emitted when the ARK keeper is halted due to a `LUPBelowHTP` error. The keeper will not run again until the process is restarted.
-          * `subgraph_fail_open_enabled` - emitted at startup when `keeper.exitOnSubgraphFailure` is set to `false`, meaning subgraph query failures will be treated as if there are no auctions.
+          * `pending_transaction_detected` - a transaction submitted by a previous run is still pending, so the keeper skips this interval instead of risking duplicate submissions.
           * `oracle_staleness_check_disabled` - emitted at startup when the Chronicle stale-price check has been explicitly disabled with `oracle.onchainMaxStaleness: null`.
           * `oracle_denomination_degenerate` - emitted at startup when the collateral and quote token addresses (offchain) or the two Chronicle feed addresses (onchain) are identical, which makes that oracle return a constant price of 1.0.
           * `oracle_fixed_price_enabled` - emitted at startup when `oracle.fixedPrice` is configured and the keeper will bypass live oracle reads.
@@ -250,7 +252,6 @@ Due to LUP and HTP shifting dynamically with pool activity, the in-range boundar
           * `metavault_run_failed` - the metavault run threw an unexpected error and was isolated by the scheduler so the ARK runs still execute.
           * `keeper_run_failed` - run aborted with error details (scheduler-level catch).
           * `tx_failed` - failed tx with phase (`send`, `fail`, `revert`, `insufficient_funds`), hash, receipt, and context.
-          * `subgraph_query_failed` - query for open auctions via configured subgraph threw an error.
       * Fatal:
           * `uncaught_exception` - an unhandled error crashed the keeper process.
           * `unhandled_rejection` - an unhandled promise rejection crashed the keeper process.
@@ -357,7 +358,7 @@ For `.env`, define the required secrets:
 cp .env.example .env
 ```
 
-Then replace the placeholder values in `.env`. At minimum, `RPC_URL`, `SUBGRAPH_URL`, and exactly one credential mode must be set:
+Then replace the placeholder values in `.env`. At minimum, `RPC_URL` and exactly one credential mode must be set:
 
 - `PRIVATE_KEY`
 - `KEYSTORE_PATH`
@@ -377,9 +378,9 @@ In production, `.env` values should be provided at runtime from the deployment e
 
 ## <a name="deployment-requirements"></a>Deployment Requirements
 
-For every managed ARK, the keeper signer must be authorised as a keeper in the ARK's `VaultAuth`. If an ARK is managed through this repo's metavault flow, its `bufferRatio`, `tax`, and `toll` must all be set to `0`. In this operating model, withdrawal liquidity is managed at the shared Euler Earn Buffer layer rather than being intentionally retained inside each ARK, and the reallocation planner assumes ARK deposits and withdrawals are not charged a fee. The keeper reads all three values at startup and refuses to boot if any managed ARK has a non-zero `bufferRatio`, `tax`, or `toll`.
+For every managed ARK, the keeper signer must be authorised as a keeper in the ARK's `VaultAuth`, and the configured `vaultAuthAddress` must be the vault's own immutable `AUTH` contract. The keeper verifies the `AUTH` binding at startup and refuses to boot on a mismatch, since a detached auth would pass the fee checks below while the real one charges fees. Every ARK must be a pool of the configured `quoteTokenAddress`, which is also the metavault asset. Collateral may differ per ARK: each ARK is priced with its resolved collateral configuration (`collateralTokenAddress` and `onchainCollateralAddress`, per ARK or global), and the keeper verifies at startup that each ARK's resolved collateral token matches its pool's actual collateral. If an ARK is managed through this repo's metavault flow, its `bufferRatio`, `tax`, and `toll` must all be set to `0`. In this operating model, withdrawal liquidity is managed at the shared Euler Earn Buffer layer rather than being intentionally retained inside each ARK, and the reallocation planner assumes ARK deposits and withdrawals are not charged a fee. The keeper reads all three values at startup and refuses to boot if any managed ARK has a non-zero `bufferRatio`, `tax`, or `toll`.
 
-If `metavaultAddress` is set, the Euler Earn deployment also needs to match the keeper's assumptions. The strategy at `buffer.address` must be the first strategy in the deployment's strategy array, its cap must be `type(uint136).max`, and that cap must already have been accepted on the metavault before the keeper starts. The keeper treats that strategy as the shared Buffer allocation when it computes metavault reallocations.
+If `metavaultAddress` is set, the Euler Earn deployment also needs to match the keeper's assumptions. The strategy at `buffer.address` must be the first strategy in the deployment's strategy array, its cap must be `type(uint136).max`, and that cap must already have been accepted on the metavault before the keeper starts. The keeper treats that strategy as the shared Buffer allocation when it computes metavault reallocations. For the ARK strategies themselves, prefer finite Euler supply caps sized to each ARK's intended maximum allocation. The keeper enforces its percentage limits only in the offchain plan, so finite onchain caps bound how far public deposits and withdrawals between keeper runs can push an ARK past its intended share.
 
 ## <a name="operator-responsibilities"></a>Operator Responsibilities
 
@@ -389,7 +390,7 @@ At a minimum, the operator must ensure the following:
 
 - the chosen credential mode matches the environment and the signer remains funded and reachable
 - the process runs under a supervisor and is restarted after crashes or intentional halts
-- RPC, subgraph, and oracle dependencies are monitored for latency, availability, and drift
+- RPC and oracle dependencies are monitored for latency, availability, and drift
 - warning, error, and fatal logs are routed to paging or incident tooling
 - ARK and metavault permissions are correct before the process is enabled
 - deployment-specific values such as interval, oracle mode, allocation bounds, and gas settings have been reviewed for the target market
@@ -398,7 +399,6 @@ The settings below change the operational model and should be reviewed explicitl
 
 | Setting | Operational meaning |
 | ------- | ------------------- |
-| `keeper.exitOnSubgraphFailure` | `true` fails closed when the bad-debt dependency is unavailable. `false` keeps the process running but treats subgraph outages as if there are no blocking auctions. |
 | `oracle.fixedPrice` | Bypasses live oracle reads and freshness checks. Use only as an explicit emergency or controlled override. |
 | `oracle.onchainPrimary`, `oracle.onchainCollateralAddress`, `oracle.onchainQuoteAddress`, `oracle.apiUrl`, `oracle.onchainMaxStaleness`, `oracle.offchainMaxStaleness` | Define which oracle path the keeper trusts first, whether it can fall back, and how stale live oracle data may be before the run aborts. |
 | `transaction.gasBuffer`, `transaction.defaultGas`, `transaction.confirmations` | Define gas padding, fallback gas limit, and how long the keeper waits before treating each submitted step as confirmed. |
@@ -415,7 +415,6 @@ The [full event list is above](#technical-overview-6-housekeeping-and-telemetry)
 | ----- | ------- |
 | `ark_run_halted` | An ARK hit `LUPBelowHTP` and will stay halted until the process is restarted. |
 | `paused_arks_detected`, `ark_run_aborted`, `metavault_run_aborted` | The run exited early because a contract state or keeper guard prevented safe progress. |
-| `subgraph_fail_open_enabled`, `subgraph_query_failed` | The bad-debt dependency is in fail-open mode or currently failing. |
 | `oracle_staleness_check_disabled`, `oracle_fixed_price_enabled`, `price_query_failed` | Oracle safety checks are disabled or a price source is degraded. |
 | `gas_estimation_failed`, `tx_failed` | A transaction needed fallback gas logic or failed to execute. |
 | `keeper_run_failed`, `uncaught_exception`, `unhandled_rejection` | The process or a full scheduled run failed at the top level. |
